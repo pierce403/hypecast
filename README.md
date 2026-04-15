@@ -26,3 +26,9 @@ Copy `.env.example` to `.env` if you need custom settings.
 - Farcaster sign-in uses the public relay and works best when the dev server is reachable on the same device or via a tunnel.
 - XMTP browser clients rely on OPFS-backed storage, so multiple tabs using the same app instance can conflict.
 - The UI is intentionally modular: wallet, Farcaster, and XMTP each live behind dedicated service adapters in `src/services`.
+
+## Deployment
+
+- Production deploys from `main` through `.github/workflows/deploy-pages.yml`.
+- GitHub Pages should stay on the `workflow` build type with the custom domain set to `hypecast.net`.
+- The workflow uploads the Vite `dist/` output as the Pages artifact and deploys it to the `github-pages` environment.
