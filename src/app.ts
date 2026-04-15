@@ -4,6 +4,7 @@ import {
   createFarcasterChannel,
   waitForFarcasterProfile
 } from "./services/farcaster";
+import { loadFeedSnapshot } from "./services/feed";
 import { connectWallet, shortAddress, type WalletSession } from "./services/wallet";
 import { connectXmtp } from "./services/xmtp";
 import { getHypecastTestApi } from "./test-support";
@@ -11,11 +12,13 @@ import type {
   AppState,
   BeforeInstallPromptEvent,
   FarcasterProfile,
+  FeedCast,
+  FeedSnapshot,
   XmtpState
 } from "./types";
 
 type NavPane = "home" | "apps" | "wallet" | "notifications" | "chat";
-type TimelineTab = "following" | "home" | "portland" | "infosec" | "eth-security";
+type TimelineTab = string;
 type Overlay = "none" | "profile" | "search" | "composer";
 type IconName =
   | "apps"
@@ -33,25 +36,6 @@ type IconName =
   | "sparkle"
   | "wallet";
 
-interface StaticCast {
-  id: string;
-  channel: Exclude<TimelineTab, "following">;
-  authorName: string;
-  authorHandle: string;
-  authorInitial: string;
-  accentClass: string;
-  verified?: boolean;
-  time: string;
-  contextLabel?: string;
-  text: string;
-  media?: {
-    kind: "link" | "sketch";
-    eyebrow?: string;
-    title: string;
-    description: string;
-  };
-}
-
 interface SearchResult {
   id: string;
   kind: "timeline" | "pane" | "cast" | "profile";
@@ -68,7 +52,7 @@ interface UiState {
   overlay: Overlay;
   searchQuery: string;
   composerDraft: string;
-  localCasts: StaticCast[];
+  localCasts: FeedCast[];
 }
 
 interface FocusTarget {
@@ -83,13 +67,10 @@ const STORAGE_KEYS = {
   localCasts: "hypecast:local-casts"
 } as const;
 
-const timelineTabs: Array<{ id: TimelineTab; label: string }> = [
-  { id: "following", label: "following" },
-  { id: "home", label: "home" },
-  { id: "portland", label: "portland" },
-  { id: "infosec", label: "infosec" },
-  { id: "eth-security", label: "eth-security" }
-];
+const feedAggregateTab = {
+  id: "following",
+  label: "following"
+} as const;
 
 const navItems: Array<{ id: NavPane; label: string; icon: IconName }> = [
   { id: "home", label: "Home", icon: "home" },
@@ -99,84 +80,6 @@ const navItems: Array<{ id: NavPane; label: string; icon: IconName }> = [
   { id: "chat", label: "Chat", icon: "chat" }
 ];
 
-const staticCasts: StaticCast[] = [
-  {
-    id: "shell-refresh",
-    channel: "home",
-    authorName: "hypecast",
-    authorHandle: "build",
-    authorInitial: "H",
-    accentClass: "accent-orange",
-    verified: true,
-    time: "4m",
-    text:
-      "Rebuilding the signed-in shell around a familiar phone posture makes the product direction obvious before live feed plumbing lands.",
-    media: {
-      kind: "link",
-      eyebrow: "hypecast.net",
-      title: "Logged-in shell now mirrors a real Farcaster stance",
-      description:
-        "Avatar on the left, search on the right, docked nav below, and composer floating above the rail."
-    }
-  },
-  {
-    id: "wallet-rail",
-    channel: "portland",
-    authorName: "wallet deck",
-    authorHandle: "system",
-    authorInitial: "W",
-    accentClass: "accent-teal",
-    time: "9m",
-    contextLabel: "in portland",
-    text:
-      "Keeping wallet actions on the bottom rail means signing, onboarding, and messaging all stay one thumb away from the home feed.",
-    media: {
-      kind: "link",
-      eyebrow: "launchpad",
-      title: "Wallet controls stay inside the shell",
-      description:
-        "Connect flow, chain display, and install callouts now live inside the mobile frame instead of a separate dashboard."
-    }
-  },
-  {
-    id: "xmtp-opfs",
-    channel: "infosec",
-    authorName: "relay ops",
-    authorHandle: "xmtp",
-    authorInitial: "R",
-    accentClass: "accent-violet",
-    time: "12m",
-    contextLabel: "in infosec",
-    text:
-      "XMTP still wants one active browser profile per app instance. The chat pane exposes bootstrap state without hiding that storage constraint.",
-    media: {
-      kind: "sketch",
-      eyebrow: "secure storage",
-      title: "OPFS-backed client initialization stays visible",
-      description:
-        "The shell surfaces XMTP readiness while keeping the existing browser bootstrap path intact."
-    }
-  },
-  {
-    id: "eth-surface",
-    channel: "eth-security",
-    authorName: "channel watch",
-    authorHandle: "ethereum",
-    authorInitial: "E",
-    accentClass: "accent-slate",
-    time: "18m",
-    contextLabel: "in eth-security",
-    text:
-      "This pass is layout-first, not protocol-first. Search, composer, feed hydration, and real notifications are tracked but still deliberately staged.",
-    media: {
-      kind: "link",
-      eyebrow: "FEATURES.md",
-      title: "Feature maturity is now documented at the repo root",
-      description:
-        "Stable, in-progress, and planned features are tracked with concrete properties and test criteria."
-    }
-  }
-];
 
 function loadStoredJson<T>(key: string): T | null {
   try {
@@ -248,35 +151,95 @@ function saveStoredComposerDraft(draft: string): void {
   }
 }
 
-function isStoredCast(value: unknown): value is StaticCast {
+function normalizeStoredMedia(value: unknown): FeedCast["media"] {
   if (!value || typeof value !== "object") {
-    return false;
+    return undefined;
   }
 
-  const candidate = value as Partial<StaticCast>;
+  const candidate = value as Partial<NonNullable<FeedCast["media"]>>;
 
-  return (
-    typeof candidate.id === "string" &&
-    typeof candidate.channel === "string" &&
-    typeof candidate.authorName === "string" &&
-    typeof candidate.authorInitial === "string" &&
-    typeof candidate.accentClass === "string" &&
-    typeof candidate.time === "string" &&
-    typeof candidate.text === "string"
-  );
+  if (
+    (candidate.kind !== "image" && candidate.kind !== "link") ||
+    typeof candidate.title !== "string" ||
+    typeof candidate.description !== "string"
+  ) {
+    return undefined;
+  }
+
+  return {
+    kind: candidate.kind,
+    title: candidate.title,
+    description: candidate.description,
+    src: typeof candidate.src === "string" ? candidate.src : undefined,
+    alt: typeof candidate.alt === "string" ? candidate.alt : undefined,
+    eyebrow: typeof candidate.eyebrow === "string" ? candidate.eyebrow : undefined
+  };
 }
 
-function loadStoredLocalCasts(): StaticCast[] {
+function normalizeStoredCast(value: unknown): FeedCast | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.channel !== "string" ||
+    typeof candidate.authorName !== "string" ||
+    typeof candidate.authorInitial !== "string" ||
+    typeof candidate.text !== "string"
+  ) {
+    return null;
+  }
+
+  const timestamp =
+    typeof candidate.timestamp === "number"
+      ? candidate.timestamp
+      : typeof candidate.time === "string"
+        ? Date.now()
+        : Number.NaN;
+
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+
+  return {
+    id: candidate.id,
+    channel: candidate.channel,
+    authorName: candidate.authorName,
+    authorHandle:
+      typeof candidate.authorHandle === "string"
+        ? candidate.authorHandle
+        : candidate.authorName.toLowerCase().replaceAll(/\s+/g, ""),
+    authorInitial: candidate.authorInitial,
+    authorAvatarUrl:
+      typeof candidate.authorAvatarUrl === "string" ? candidate.authorAvatarUrl : undefined,
+    accentClass: typeof candidate.accentClass === "string" ? candidate.accentClass : undefined,
+    timestamp,
+    contextLabel: typeof candidate.contextLabel === "string" ? candidate.contextLabel : undefined,
+    text: candidate.text,
+    permalink: typeof candidate.permalink === "string" ? candidate.permalink : undefined,
+    replies: typeof candidate.replies === "number" ? candidate.replies : undefined,
+    recasts: typeof candidate.recasts === "number" ? candidate.recasts : undefined,
+    reactions: typeof candidate.reactions === "number" ? candidate.reactions : undefined,
+    media: normalizeStoredMedia(candidate.media)
+  };
+}
+
+function loadStoredLocalCasts(): FeedCast[] {
   const casts = loadStoredJson<unknown[]>(STORAGE_KEYS.localCasts);
 
   if (!Array.isArray(casts)) {
     return [];
   }
 
-  return casts.filter(isStoredCast);
+  return casts
+    .map(normalizeStoredCast)
+    .filter((cast): cast is FeedCast => cast !== null);
 }
 
-function saveStoredLocalCasts(casts: StaticCast[]): void {
+function saveStoredLocalCasts(casts: FeedCast[]): void {
   if (casts.length === 0) {
     removeStoredValue(STORAGE_KEYS.localCasts);
     return;
@@ -390,6 +353,9 @@ function getInitialState(): AppState {
           status: "idle"
         },
     xmtp: {
+      status: "idle"
+    },
+    feed: {
       status: "idle"
     }
   };
@@ -507,17 +473,68 @@ function summarizeText(value: string, maxLength = 68): string {
   return `${value.slice(0, maxLength - 1).trimEnd()}...`;
 }
 
-function publishChannel(ui: UiState): Exclude<TimelineTab, "following"> {
-  if (ui.activePane === "home" && ui.activeTimeline !== "following") {
+function getTimelineTabs(snapshot?: FeedSnapshot): Array<{ id: TimelineTab; label: string }> {
+  return [
+    feedAggregateTab,
+    ...(snapshot?.sources.map((source) => ({
+      id: source.id,
+      label: source.label
+    })) ?? [])
+  ];
+}
+
+function getAllFeedCasts(state: AppState, ui: UiState): FeedCast[] {
+  return [...ui.localCasts, ...(state.feed.snapshot?.casts ?? [])];
+}
+
+function getFeedSource(snapshot: FeedSnapshot | undefined, sourceId: string) {
+  return snapshot?.sources.find((source) => source.id === sourceId);
+}
+
+function formatRelativeTime(timestamp: number): string {
+  const deltaSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+
+  if (deltaSeconds < 60) {
+    return "now";
+  }
+
+  const deltaMinutes = Math.floor(deltaSeconds / 60);
+
+  if (deltaMinutes < 60) {
+    return `${deltaMinutes}m`;
+  }
+
+  const deltaHours = Math.floor(deltaMinutes / 60);
+
+  if (deltaHours < 24) {
+    return `${deltaHours}h`;
+  }
+
+  const deltaDays = Math.floor(deltaHours / 24);
+
+  if (deltaDays < 7) {
+    return `${deltaDays}d`;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "numeric",
+    day: "numeric",
+    year: "numeric"
+  }).format(new Date(timestamp));
+}
+
+function publishChannel(state: AppState, ui: UiState): TimelineTab {
+  if (ui.activePane === "home" && ui.activeTimeline !== feedAggregateTab.id) {
     return ui.activeTimeline;
   }
 
-  return "home";
+  return state.feed.snapshot?.sources[0]?.id ?? "following";
 }
 
-function buildLocalCast(state: AppState, ui: UiState, text: string): StaticCast {
-  const channel = publishChannel(ui);
+function buildLocalCast(state: AppState, ui: UiState, text: string): FeedCast {
+  const channel = publishChannel(state, ui);
   const profile = state.farcaster.profile;
+  const source = getFeedSource(state.feed.snapshot, channel);
 
   return {
     id: `local-${Date.now()}`,
@@ -525,11 +542,12 @@ function buildLocalCast(state: AppState, ui: UiState, text: string): StaticCast 
     authorName: profileName(profile),
     authorHandle: profile?.username ?? "guest",
     authorInitial: profileInitial(profile),
+    authorAvatarUrl: profile?.pfpUrl,
     accentClass: "accent-live",
-    verified: Boolean(profile),
-    time: "now",
-    contextLabel: channel === "home" ? undefined : `in ${channel}`,
-    text
+    timestamp: Date.now(),
+    contextLabel: channel === feedAggregateTab.id ? undefined : `in ${source?.label ?? channel}`,
+    text,
+    permalink: undefined
   };
 }
 
@@ -665,11 +683,6 @@ function renderIdentityCard(state: AppState): string {
         <div class="feed-main">
           <div class="author-row">
             <strong>${escapeHtml(profileName(profile))}</strong>
-            ${
-              profile
-                ? `<span class="verified-dot" aria-hidden="true"></span>`
-                : ""
-            }
             <span class="author-meta">${escapeHtml(profileHandle(profile))}</span>
             <span class="author-meta">now</span>
           </div>
@@ -705,9 +718,22 @@ function renderIdentityCard(state: AppState): string {
   `;
 }
 
-function renderStaticMedia(media: StaticCast["media"]): string {
+function renderFeedMedia(media: FeedCast["media"]): string {
   if (!media) {
     return "";
+  }
+
+  if (media.kind === "image" && media.src) {
+    return `
+      <div class="media-card media-image">
+        <img src="${escapeAttribute(media.src)}" alt="${escapeAttribute(media.alt ?? media.title)}" />
+        <div class="media-copy">
+          ${media.eyebrow ? `<p class="media-eyebrow">${escapeHtml(media.eyebrow)}</p>` : ""}
+          <strong>${escapeHtml(media.title)}</strong>
+          <p>${escapeHtml(media.description)}</p>
+        </div>
+      </div>
+    `;
   }
 
   if (media.kind === "link") {
@@ -725,40 +751,37 @@ function renderStaticMedia(media: StaticCast["media"]): string {
     `;
   }
 
-  return `
-    <div class="media-card media-sketch">
-      <div class="sketch-surface">
-        <span class="sketch-glyph">${renderIcon("compose")}</span>
-      </div>
-      <div class="media-copy">
-        ${media.eyebrow ? `<p class="media-eyebrow">${escapeHtml(media.eyebrow)}</p>` : ""}
-        <strong>${escapeHtml(media.title)}</strong>
-        <p>${escapeHtml(media.description)}</p>
-      </div>
-    </div>
-  `;
+  return "";
 }
 
-function renderStaticCast(cast: StaticCast): string {
+function renderFeedCast(cast: FeedCast): string {
   return `
     <article class="feed-card">
       <div class="feed-header">
         <div class="feed-avatar-wrap">
-          <span class="feed-avatar feed-avatar-fallback ${escapeAttribute(cast.accentClass)}">${escapeHtml(
-            cast.authorInitial
-          )}</span>
+          ${
+            cast.authorAvatarUrl
+              ? `<img class="feed-avatar" src="${escapeAttribute(cast.authorAvatarUrl)}" alt="${escapeAttribute(cast.authorName)}" />`
+              : `<span class="feed-avatar feed-avatar-fallback ${escapeAttribute(cast.accentClass ?? "accent-live")}">${escapeHtml(
+                  cast.authorInitial
+                )}</span>`
+          }
         </div>
         <div class="feed-main">
           <div class="author-row">
             <strong>${escapeHtml(cast.authorName)}</strong>
-            ${cast.verified ? `<span class="verified-dot" aria-hidden="true"></span>` : ""}
+            <span class="author-meta">@${escapeHtml(cast.authorHandle)}</span>
             ${cast.contextLabel ? `<span class="context-pill">${escapeHtml(cast.contextLabel)}</span>` : ""}
-            <span class="author-meta">${escapeHtml(cast.time)}</span>
+            <span class="author-meta">${escapeHtml(formatRelativeTime(cast.timestamp))}</span>
           </div>
           <p class="cast-text">${escapeHtml(cast.text)}</p>
-          ${renderStaticMedia(cast.media)}
+          ${renderFeedMedia(cast.media)}
         </div>
-        <span class="feed-menu" aria-hidden="true">${renderIcon("more")}</span>
+        ${
+          cast.permalink
+            ? `<a class="feed-menu" href="${escapeAttribute(cast.permalink)}" target="_blank" rel="noreferrer" aria-label="Open cast">${renderIcon("more")}</a>`
+            : `<span class="feed-menu" aria-hidden="true">${renderIcon("more")}</span>`
+        }
       </div>
       ${renderFeedActions()}
     </article>
@@ -773,9 +796,9 @@ function getSearchResults(state: AppState, ui: UiState): SearchResult[] {
   }
 
   const results: SearchResult[] = [];
-  const allCasts = [...ui.localCasts, ...staticCasts];
+  const allCasts = getAllFeedCasts(state, ui);
 
-  timelineTabs.forEach((tab) => {
+  getTimelineTabs(state.feed.snapshot).forEach((tab) => {
     if (normalizeSearch(tab.label).includes(query)) {
       results.push({
         id: `timeline-${tab.id}`,
@@ -821,10 +844,12 @@ function getSearchResults(state: AppState, ui: UiState): SearchResult[] {
   }
 
   allCasts.forEach((cast) => {
+    const source = getFeedSource(state.feed.snapshot, cast.channel);
     const searchBlob = [
       cast.authorName,
       cast.authorHandle,
       cast.channel,
+      source?.displayName ?? "",
       cast.contextLabel ?? "",
       cast.text,
       cast.media?.title ?? "",
@@ -838,7 +863,7 @@ function getSearchResults(state: AppState, ui: UiState): SearchResult[] {
         id: `cast-${cast.id}`,
         kind: "cast",
         title: summarizeText(`${cast.authorName}: ${cast.text}`, 82),
-        detail: cast.contextLabel ?? `in ${cast.channel}`,
+        detail: cast.contextLabel ?? `in ${source?.label ?? cast.channel}`,
         timeline: cast.channel
       });
     }
@@ -865,28 +890,33 @@ function renderSearchResult(result: SearchResult): string {
   `;
 }
 
-function renderEmptyTimeline(activeTimeline: TimelineTab): string {
+function renderEmptyTimeline(activeTimeline: TimelineTab, snapshot?: FeedSnapshot): string {
+  const label =
+    activeTimeline === feedAggregateTab.id
+      ? feedAggregateTab.label
+      : getFeedSource(snapshot, activeTimeline)?.label ?? activeTimeline;
+
   return `
     <article class="feed-card empty-card">
-      <p class="eyebrow-label">${escapeHtml(activeTimeline)}</p>
-      <h2>No local casts on this tab yet.</h2>
+      <p class="eyebrow-label">${escapeHtml(label)}</p>
+      <h2>No recent casts are available for this tab.</h2>
       <p class="support-copy">
-        Live timeline hydration is still planned. The shell is in place so the real data can slot in next.
+        The shell is using the latest feed snapshot available in the app. Try another source or refresh the snapshot asset.
       </p>
     </article>
   `;
 }
 
 function renderHomePane(state: AppState, ui: UiState): string {
-  const allCasts = [...ui.localCasts, ...staticCasts];
+  const allCasts = getAllFeedCasts(state, ui);
   const filteredCasts =
-    ui.activeTimeline === "following"
+    ui.activeTimeline === feedAggregateTab.id
       ? allCasts
       : allCasts.filter((cast) => cast.channel === ui.activeTimeline);
 
   const cards: string[] = [];
 
-  if (ui.activeTimeline === "following" || ui.activeTimeline === "home") {
+  if (ui.activeTimeline === feedAggregateTab.id) {
     if (state.farcaster.status !== "connected") {
       cards.push(renderAuthCard(state));
     }
@@ -894,16 +924,41 @@ function renderHomePane(state: AppState, ui: UiState): string {
     cards.push(renderIdentityCard(state));
   }
 
-  if (filteredCasts.length === 0) {
-    cards.push(renderEmptyTimeline(ui.activeTimeline));
+  if (state.feed.status === "loading" && filteredCasts.length === 0) {
+    cards.push(`
+      <article class="feed-card empty-card">
+        <p class="eyebrow-label">syncing</p>
+        <h2>Loading the Farcaster feed snapshot.</h2>
+        <p class="support-copy">Pulling the latest published snapshot into the shell.</p>
+      </article>
+    `);
+  } else if (state.feed.status === "error" && filteredCasts.length === 0) {
+    cards.push(`
+      <article class="feed-card empty-card">
+        <p class="eyebrow-label">feed unavailable</p>
+        <h2>Could not load the Farcaster feed.</h2>
+        <p class="support-copy">${escapeHtml(state.feed.error ?? "The feed snapshot request failed.")}</p>
+      </article>
+    `);
+  } else if (filteredCasts.length === 0) {
+    cards.push(renderEmptyTimeline(ui.activeTimeline, state.feed.snapshot));
   } else {
-    cards.push(...filteredCasts.map(renderStaticCast));
+    cards.push(...filteredCasts.map(renderFeedCast));
   }
 
   return `<section class="feed-stack">${cards.join("")}</section>`;
 }
 
 function renderAppsPane(state: AppState): string {
+  const snapshotStamp = state.feed.snapshot
+    ? new Intl.DateTimeFormat("en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit"
+      }).format(new Date(state.feed.snapshot.generatedAt))
+    : "Waiting for first sync";
+
   return `
     <section class="pane-stack">
       <article class="pane-card">
@@ -935,7 +990,7 @@ function renderAppsPane(state: AppState): string {
           </div>
           <div class="mini-item">
             <span>In progress</span>
-            <strong>Logged-in mobile chrome</strong>
+            <strong>Snapshot-backed mobile feed</strong>
           </div>
           <div class="mini-item">
             <span>In progress</span>
@@ -955,6 +1010,10 @@ function renderAppsPane(state: AppState): string {
           <div class="mini-item">
             <span>XMTP env</span>
             <strong>${escapeHtml(APP_CONFIG.xmtpEnv)}</strong>
+          </div>
+          <div class="mini-item">
+            <span>Feed snapshot</span>
+            <strong>${escapeHtml(snapshotStamp)}</strong>
           </div>
         </div>
       </article>
@@ -1094,6 +1153,21 @@ function renderPane(state: AppState, ui: UiState): string {
 function renderSearchOverlay(state: AppState, ui: UiState): string {
   const query = ui.searchQuery.trim();
   const results = getSearchResults(state, ui);
+  const quickTimelineChips = getTimelineTabs(state.feed.snapshot)
+    .slice(0, 4)
+    .map(
+      (tab) =>
+        `<button class="suggestion-chip" type="button" data-timeline="${escapeAttribute(tab.id)}">${escapeHtml(tab.label)}</button>`
+    )
+    .join("");
+  const quickPaneChips = navItems
+    .filter((item) => item.id !== "home")
+    .slice(0, 3)
+    .map(
+      (item) =>
+        `<button class="suggestion-chip" type="button" data-nav="${escapeAttribute(item.id)}">${escapeHtml(item.label.toLowerCase())}</button>`
+    )
+    .join("");
 
   return `
     <div class="overlay-backdrop">
@@ -1133,17 +1207,13 @@ function renderSearchOverlay(state: AppState, ui: UiState): string {
               `
             : `
               <div class="suggestion-grid">
-                <button class="suggestion-chip" type="button" data-timeline="following">following</button>
-                <button class="suggestion-chip" type="button" data-timeline="portland">portland</button>
-                <button class="suggestion-chip" type="button" data-timeline="infosec">infosec</button>
-                <button class="suggestion-chip" type="button" data-nav="wallet">wallet deck</button>
-                <button class="suggestion-chip" type="button" data-nav="chat">chat rail</button>
-                <button class="suggestion-chip" type="button" data-nav="apps">launchpad</button>
+                ${quickTimelineChips}
+                ${quickPaneChips}
               </div>
             `
         }
         <p class="support-copy">
-          Search is local-first right now. Live network discovery can layer on later without changing the shell.
+          Search is local-first right now and runs against the current Farcaster snapshot plus your local drafts and casts.
         </p>
       </section>
     </div>
@@ -1273,18 +1343,16 @@ function renderOverlay(state: AppState, ui: UiState): string {
   }
 }
 
-function unreadBadge(state: AppState, navId: NavPane): string {
-  if (navId !== "chat" || state.xmtp.status === "connected") {
-    return "";
-  }
-
-  return `<span class="nav-badge">1</span>`;
+function unreadBadge(_state: AppState, _navId: NavPane): string {
+  return "";
 }
 
 function template(
   state: AppState,
   ui: UiState
 ): string {
+  const timelineTabs = getTimelineTabs(state.feed.snapshot);
+
   return `
     <div class="app-shell">
       <div class="ambient ambient-left"></div>
@@ -1399,6 +1467,39 @@ export function createApp(root: HTMLDivElement): void {
 
   const clearComposerDraft = () => {
     persistComposerDraft("");
+  };
+
+  const refreshFeedSnapshot = async () => {
+    setPartialState({
+      feed: {
+        status: "loading",
+        snapshot: state.feed.snapshot
+      }
+    });
+
+    try {
+      const snapshot = await loadFeedSnapshot();
+      const nextTabs = new Set(getTimelineTabs(snapshot).map((tab) => tab.id));
+
+      if (!nextTabs.has(ui.activeTimeline)) {
+        ui.activeTimeline = feedAggregateTab.id;
+      }
+
+      setPartialState({
+        feed: {
+          status: "ready",
+          snapshot
+        }
+      });
+    } catch (error) {
+      setPartialState({
+        feed: {
+          status: "error",
+          snapshot: state.feed.snapshot,
+          error: error instanceof Error ? error.message : "The feed snapshot request failed."
+        }
+      });
+    }
   };
 
   const handlePublishCast = () => {
@@ -1711,4 +1812,5 @@ export function createApp(root: HTMLDivElement): void {
   });
 
   render();
+  void refreshFeedSnapshot();
 }

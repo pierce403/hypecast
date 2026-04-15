@@ -1,0 +1,303 @@
+{
+  "generatedAt": "2026-04-15T20:04:27.914Z",
+  "sources": [
+    {
+      "id": "farcaster",
+      "label": "farcaster",
+      "username": "farcaster",
+      "displayName": "Farcaster",
+      "pfpUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/3d6cd649-9f46-43b3-4ba7-ba3d0fdeb900/original",
+      "bio": "tinkerers of open webs",
+      "accentClass": "accent-violet"
+    },
+    {
+      "id": "v",
+      "label": "v",
+      "username": "v",
+      "displayName": "Varun Srinivasan",
+      "pfpUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/e3d80f99-f7c0-4b04-dcad-557593d85500/original",
+      "bio": "Technowatermelon. Elder Millenial. Building Farcaster. \n\nnf.td/varun",
+      "accentClass": "accent-live"
+    },
+    {
+      "id": "dwr",
+      "label": "dwr",
+      "username": "dwr",
+      "displayName": "Dan Romero",
+      "pfpUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/bc698287-5adc-4cc5-a503-de16963ed900/original",
+      "bio": "Interested in technology and other stuff.",
+      "accentClass": "accent-orange"
+    },
+    {
+      "id": "base",
+      "label": "base",
+      "username": "base.base.eth",
+      "displayName": "Base",
+      "pfpUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/ce5460f6-40a2-4486-47c1-7801e4033e00/original",
+      "bio": "base.org | Collects ≤ $5 of creator coins to support artists · Not financial advice wallet.coinbase.com/purchases-disclaimer",
+      "accentClass": "accent-teal"
+    }
+  ],
+  "casts": [
+    {
+      "id": "0x6a5609fbbba5d4b37156ae16f7fb1969b83bfa72",
+      "channel": "base",
+      "authorName": "Base",
+      "authorHandle": "base.base.eth",
+      "authorInitial": "B",
+      "authorAvatarUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/ce5460f6-40a2-4486-47c1-7801e4033e00/original",
+      "accentClass": "accent-teal",
+      "timestamp": 1768241773000,
+      "contextLabel": "via base",
+      "text": "Meet @macedo.eth, co-founder of @talent What started as a side experiment with crypto quickly became an obsession, leading him to build the reputation layer for builders This is his story",
+      "replies": 1442,
+      "recasts": 154,
+      "reactions": 2477
+    },
+    {
+      "id": "0xea9f928cb79e18343bee4dfc942ef8f9174fe64d",
+      "channel": "base",
+      "authorName": "Base",
+      "authorHandle": "base.base.eth",
+      "authorInitial": "B",
+      "authorAvatarUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/ce5460f6-40a2-4486-47c1-7801e4033e00/original",
+      "accentClass": "accent-teal",
+      "timestamp": 1766685448000,
+      "contextLabel": "via base",
+      "text": "Happy holidays, from Base",
+      "replies": 449,
+      "recasts": 211,
+      "reactions": 2381,
+      "media": {
+        "kind": "image",
+        "src": "https://res.cloudinary.com/base-app/image/upload/f_auto/v1766685444/42e2598f-5290-49d2-9020-b463410867ac.png",
+        "alt": "Cast image embed",
+        "title": "Base",
+        "description": "Happy holidays, from Base"
+      }
+    },
+    {
+      "id": "0x8af4a76802401623ef528b2befe0ba54bcf4873e",
+      "channel": "farcaster",
+      "authorName": "Farcaster",
+      "authorHandle": "farcaster",
+      "authorInitial": "F",
+      "authorAvatarUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/3d6cd649-9f46-43b3-4ba7-ba3d0fdeb900/original",
+      "accentClass": "accent-violet",
+      "timestamp": 1761537757000,
+      "contextLabel": "via farcaster",
+      "text": "I just minted a custom Warplet with DNA generated from my Farcaster profile. Join The Warplet family!",
+      "replies": 518,
+      "recasts": 2345,
+      "reactions": 4608,
+      "media": {
+        "kind": "link",
+        "eyebrow": "harmonybot.xyz",
+        "title": "Harmonybot",
+        "description": "Onchain art collectibles built with Farcaster legos."
+      }
+    },
+    {
+      "id": "0x0bc1c2075f7b9ed4e96e0b471a3e8d77568db922",
+      "channel": "dwr",
+      "authorName": "Dan Romero",
+      "authorHandle": "dwr",
+      "authorInitial": "D",
+      "authorAvatarUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/bc698287-5adc-4cc5-a503-de16963ed900/original",
+      "accentClass": "accent-orange",
+      "timestamp": 1761235811000,
+      "contextLabel": "via dwr",
+      "text": "We’re excited to share that Clanker is joining Farcaster! Clanker is the leading launchpad on Base and home to projects like Bankr, Noice, Bracky and more. We’re thrilled to join forces to make it easier for everyone to create and participate in onchain communities. We plan to integrate Clanker more deeply into the app. More on this soon. We have a few updates for the Clanker ecosystem: 1. Starting today, Clanker protocol fees will be used to buy and hold $CLANKER. 2. Clanker v0 through v3.1 collected a portion of protocol fees in ecosystem tokens into a fee vault. The Clanker team burned these tokens earlier today, reducing the circulating supply of each. 3. The Clanker team has also permanently locked roughly 7% of the $CLANKER supply into a one-sided LP to provide additional liquidity, further reducing circulating supply. FAQ in the next cast.",
+      "replies": 196,
+      "recasts": 378,
+      "reactions": 1555,
+      "media": {
+        "kind": "image",
+        "src": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/b95a3847-d297-4317-38ad-a5048a94e900/original",
+        "alt": "Cast image embed",
+        "title": "Dan Romero",
+        "description": "We’re excited to share that Clanker is joining Farcaster! Clanker is the leading launchpad on Base and home to projects like Bankr, Noice, Bracky and more. We’re thrilled to join forces to make it easier for everyone to create and participate in onchain communities. We plan to integrate Clanker more deeply into the app. More on this soon. We have a few updates for the Clanker ecosystem: 1. Starting today, Clanker protocol fees will be used to buy and hold $CLANKER. 2. Clanker v0 through v3.1 collected a portion of protocol fees in ecosystem tokens into a fee vault. The Clanker team burned these tokens earlier today, reducing the circulating supply of each. 3. The Clanker team has also permanently locked roughly 7% of the $CLANKER supply into a one-sided LP to provide additional liquidity, further reducing circulating supply. FAQ in the next cast."
+      }
+    },
+    {
+      "id": "0xbb976d2774a60efd47c7ee0d1512e021a4aa8271",
+      "channel": "farcaster",
+      "authorName": "Farcaster",
+      "authorHandle": "farcaster",
+      "authorInitial": "F",
+      "authorAvatarUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/3d6cd649-9f46-43b3-4ba7-ba3d0fdeb900/original",
+      "accentClass": "accent-violet",
+      "timestamp": 1749512273000,
+      "contextLabel": "via farcaster",
+      "text": "The Farcaster Pro NFT is live and has been airdropped to the first 10,000 subscribers in their Farcaster wallet. NFTs appear in the Collectibles tab. Art by the talented @miguelgarest.eth",
+      "replies": 99,
+      "recasts": 385,
+      "reactions": 1514,
+      "media": {
+        "kind": "image",
+        "src": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/8065002b-0513-4e0e-5eb1-9f12323fc700/original",
+        "alt": "Cast image embed",
+        "title": "Farcaster",
+        "description": "The Farcaster Pro NFT is live and has been airdropped to the first 10,000 subscribers in their Farcaster wallet. NFTs appear in the Collectibles tab. Art by the talented @miguelgarest.eth"
+      }
+    },
+    {
+      "id": "0x1299c0c4aac7f8559fda004b61f9e499821ff186",
+      "channel": "farcaster",
+      "authorName": "Farcaster",
+      "authorHandle": "farcaster",
+      "authorInitial": "F",
+      "authorAvatarUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/3d6cd649-9f46-43b3-4ba7-ba3d0fdeb900/original",
+      "accentClass": "accent-violet",
+      "timestamp": 1747936829000,
+      "contextLabel": "via farcaster",
+      "text": "Farcaster now supports Solana! - Starting today, wallet and mini apps work with Solana - Swap into any Solana token with instant bridging from other chains - Fund $10 of SOL to increase your chance for upcoming airdrops",
+      "replies": 158,
+      "recasts": 719,
+      "reactions": 2028,
+      "media": {
+        "kind": "image",
+        "src": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/e13e36e3-34c4-418b-c014-fc02e4fe3f00/original",
+        "alt": "Cast image embed",
+        "title": "Farcaster",
+        "description": "Farcaster now supports Solana! - Starting today, wallet and mini apps work with Solana - Swap into any Solana token with instant bridging from other chains - Fund $10 of SOL to increase your chance for upcoming airdrops"
+      }
+    },
+    {
+      "id": "0x4cc445b87795f6563c2bb8939b5cbf362bc0e8bc",
+      "channel": "dwr",
+      "authorName": "Dan Romero",
+      "authorHandle": "dwr",
+      "authorInitial": "D",
+      "authorAvatarUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/bc698287-5adc-4cc5-a503-de16963ed900/original",
+      "accentClass": "accent-orange",
+      "timestamp": 1747439707000,
+      "contextLabel": "via dwr",
+      "text": "coming soon",
+      "replies": 300,
+      "recasts": 736,
+      "reactions": 2490,
+      "media": {
+        "kind": "image",
+        "src": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/710702c9-f2b3-4944-ecd8-8bbecb677900/original",
+        "alt": "Cast image embed",
+        "title": "Dan Romero",
+        "description": "coming soon"
+      }
+    },
+    {
+      "id": "0xf809724b8009240961a5727afab6e01240b61e91",
+      "channel": "v",
+      "authorName": "Varun Srinivasan",
+      "authorHandle": "v",
+      "authorInitial": "V",
+      "authorAvatarUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/e3d80f99-f7c0-4b04-dcad-557593d85500/original",
+      "accentClass": "accent-live",
+      "timestamp": 1747261044000,
+      "contextLabel": "via v",
+      "text": "Warpcast is being rebranded to Farcaster 1. Mobile app will be called Farcaster 2. The Arch logo will return 3. Website will move from warpcast.com to farcaster.xyz. 4. All links will be backwards compatible. No action needed. Will roll out this week or next, depending on app store reviews.",
+      "replies": 127,
+      "recasts": 175,
+      "reactions": 888,
+      "media": {
+        "kind": "image",
+        "src": "https://client.warpcast.com/v2/og-image?castHash=0x50c4b781164e6614be861351ec90605fdf468738",
+        "alt": "Dan Romero on Warpcast",
+        "eyebrow": "warpcast.com",
+        "title": "Dan Romero on Warpcast",
+        "description": "We’re planning to move forward with rebranding the Warpcast mobile and web app to Farcaster. 1. Nothing is changing any time soon. We will take our time with this and have plenty of communication about it across multiple channels. The earliest the change will happen is mid-May, but a decent chance it happens in June. 2. We’re going to work on a plan over the next 2 weeks and should have a plan by the next developer call on May 8, 2025. We will discuss on the call. 3. For developers: we’re planning to open …"
+      }
+    },
+    {
+      "id": "0x0bec8cdc9614ac9f1abe8150c55099bd73d975a3",
+      "channel": "base",
+      "authorName": "Base",
+      "authorHandle": "base.base.eth",
+      "authorInitial": "B",
+      "authorAvatarUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/ce5460f6-40a2-4486-47c1-7801e4033e00/original",
+      "accentClass": "accent-teal",
+      "timestamp": 1709919799000,
+      "contextLabel": "in Base",
+      "text": "Frames just leveled up (again) as Farcaster rolls out transactions within /frames FRAMES OF THE FUTURE celebrates how transactions unlock the next wave of onchain innovation",
+      "replies": 218,
+      "recasts": 3681,
+      "reactions": 5127,
+      "media": {
+        "kind": "image",
+        "src": "https://new-frames-project.vercel.app/base-heart-farcaster_1080_9mb.gif",
+        "alt": "Frames of the Future",
+        "eyebrow": "new-frames-project.vercel.app",
+        "title": "Frames of the Future",
+        "description": "Base celebrates the launch of transactions in Farcaster"
+      }
+    },
+    {
+      "id": "0xb7aa69b5facc5bee5f4e6248db9e88c151b29205",
+      "channel": "v",
+      "authorName": "Varun Srinivasan",
+      "authorHandle": "v",
+      "authorInitial": "V",
+      "authorAvatarUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/e3d80f99-f7c0-4b04-dcad-557593d85500/original",
+      "accentClass": "accent-live",
+      "timestamp": 1708646318000,
+      "contextLabel": "in Farcaster",
+      "text": "You can now verify a Solana addresses on Farcaster! 1. Go to Settings -> Verified Addresses 2. Tap Verify an Address 3. Connect your wallet Verifications are part of the protocol and are available on hubs.",
+      "replies": 54,
+      "recasts": 345,
+      "reactions": 1075,
+      "media": {
+        "kind": "image",
+        "src": "https://i.imgur.com/mw5MriQ.png",
+        "alt": "Cast image embed",
+        "eyebrow": "Farcaster",
+        "title": "Varun Srinivasan",
+        "description": "You can now verify a Solana addresses on Farcaster! 1. Go to Settings -> Verified Addresses 2. Tap Verify an Address 3. Connect your wallet Verifications are part of the protocol and are available on hubs."
+      }
+    },
+    {
+      "id": "0x8976f3e702650f04e78618768a51d07793ab969d",
+      "channel": "dwr",
+      "authorName": "Dan Romero",
+      "authorHandle": "dwr",
+      "authorInitial": "D",
+      "authorAvatarUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/bc698287-5adc-4cc5-a503-de16963ed900/original",
+      "accentClass": "accent-orange",
+      "timestamp": 1708155272000,
+      "contextLabel": "via dwr",
+      "text": "Anyone that likes this cast will get this commemorative NFT for free next week when I put it on @base.base.eth with @zora. Any additional proceeds to /farcon scholarships.",
+      "replies": 485,
+      "recasts": 3630,
+      "reactions": 10477,
+      "media": {
+        "kind": "image",
+        "src": "https://i.imgur.com/XCU05cD.png",
+        "alt": "Cast image embed",
+        "title": "Dan Romero",
+        "description": "Anyone that likes this cast will get this commemorative NFT for free next week when I put it on @base.base.eth with @zora. Any additional proceeds to /farcon scholarships."
+      }
+    },
+    {
+      "id": "0x8bd8a23a9d90d171601614d4e561c01a501e2573",
+      "channel": "v",
+      "authorName": "Varun Srinivasan",
+      "authorHandle": "v",
+      "authorInitial": "V",
+      "authorAvatarUrl": "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/e3d80f99-f7c0-4b04-dcad-557593d85500/original",
+      "accentClass": "accent-live",
+      "timestamp": 1707451089000,
+      "contextLabel": "via v",
+      "text": "Farcaster “Horse” is here! A new protocol release with many perf improvements and support for frame messages. We have a commemorative mint on @base - free for active badge holders, mintable with warps for others.",
+      "replies": 212,
+      "recasts": 2094,
+      "reactions": 3060,
+      "media": {
+        "kind": "image",
+        "src": "https://mint.farcaster.xyz/api/images/start?date=1707447855896",
+        "alt": "Farcaster: Horse",
+        "eyebrow": "mint.farcaster.xyz",
+        "title": "Farcaster: Horse",
+        "description": "Check if you’re eligible for a free mint"
+      }
+    }
+  ]
+}

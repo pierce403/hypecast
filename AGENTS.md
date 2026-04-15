@@ -35,6 +35,7 @@ Verified commands:
 npm install
 npm run dev
 npm run dev -- --host 0.0.0.0
+npm run sync:feed
 npm run typecheck
 npm run build
 npx playwright install chromium
@@ -45,6 +46,7 @@ Notes:
 
 - `npm run build` runs `tsc --noEmit && vite build`.
 - `npm run dev -- --host 0.0.0.0` is useful for testing Farcaster sign-in from another device on the same network.
+- `npm run sync:feed` refreshes `public/farcaster-feed.json` from the configured Farcaster SSR profile sources.
 - `npm run test:e2e` runs the Playwright suite against a local Vite server on `127.0.0.1:4173`.
 - Install the Playwright browser runtime with `npx playwright install chromium` after adding or refreshing the dependency.
 
@@ -54,11 +56,14 @@ Notes:
 - `src/main.ts`: app bootstrap and PWA service worker registration
 - `src/app.ts`: top-level DOM rendering and interaction/state wiring
 - `src/config.ts`: runtime config parsing for RPC and XMTP environment
+- `src/services/feed.ts`: loads the committed Farcaster feed snapshot from same-origin app assets
 - `src/test-support.ts`: browser-only test seam for Playwright mocks of standalone mode, wallet, Farcaster, and XMTP
 - `src/services/wallet.ts`: injected EVM wallet connection
 - `src/services/farcaster.ts`: Farcaster auth channel creation, QR generation, and verification
 - `src/services/xmtp.ts`: XMTP browser client bootstrap
 - `src/styles.css`: global styles and responsive layout
+- `scripts/sync-farcaster-feed.mjs`: refreshes `public/farcaster-feed.json` from public Farcaster SSR profile pages
+- `public/farcaster-feed.json`: committed same-origin snapshot used by the home feed in production
 - `tests/`: Playwright end-to-end coverage for the mobile shell and mocked integration flows
 - `public/icons/icon.svg`: app icon used by the PWA manifest
 - `vite.config.ts`: Vite config plus PWA and Workbox settings
@@ -74,6 +79,7 @@ Notes:
 - Keep CSS intentional and branded. Avoid replacing the current visual direction with generic component-library styling.
 - Keep the signed-in experience inside the phone-shell UI in `src/app.ts` / `src/styles.css`. Wallet, Farcaster, XMTP, and install actions should stay reachable from panes or overlays within that shell instead of reintroducing a separate dashboard.
 - Search, draft composer state, locally published casts, and the persisted Farcaster profile currently live in `src/app.ts` via `localStorage`. If you change those flows, update the storage behavior and the E2E coverage together.
+- Keep the bottom nav outside the `.shell-content` scroll container. The intended behavior is a pinned shell footer while only the feed/pane content scrolls.
 
 ## Dependencies That Matter
 
@@ -92,6 +98,7 @@ Notes:
 - XMTP browser storage uses OPFS. Multiple tabs using the same app instance can conflict.
 - Farcaster auth via the public relay works best when the app is reachable from the signing device. On local dev, use `--host 0.0.0.0` or a tunnel if mobile sign-in is failing.
 - The XMTP SDK typings currently require a small adapter/cast when creating the client with a custom backend. Be careful upgrading that package, because the runtime behavior and the exported TypeScript shapes are not perfectly aligned.
+- The browser app cannot fetch `https://ssr.farcaster.xyz/*` directly because of cross-origin restrictions. If the home feed needs fresher real data, update the committed snapshot with `npm run sync:feed` instead of wiring runtime fetches to SSR pages.
 
 ## Deployment Notes
 
@@ -113,6 +120,7 @@ Notes:
 - Prefer extending `src/test-support.ts` for Playwright integration mocks instead of stubbing production modules ad hoc in tests.
 - The Playwright config targets a mobile Chromium profile and blocks service workers to keep the shell tests deterministic.
 - The app rerenders the shell from `root.innerHTML`, so any live text inputs added to overlays need explicit focus restoration after render, or typing/search will break.
+- Playwright defaults now include a mocked feed snapshot; if you change timeline tabs or feed copy, update `tests/feed-fixture.ts` and the corresponding E2E assertions together.
 - If you learn a new repo-specific command, deployment quirk, or SDK hazard, add it here before finishing the task.
 
 ## Rapport & Reflection

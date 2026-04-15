@@ -8,7 +8,7 @@ import {
   shortAddress
 } from "./test-helpers";
 
-test("renders the mobile shell, filters timeline tabs, and opens overlays", async ({ page }) => {
+test("renders the mobile shell, filters snapshot tabs, and opens overlays", async ({ page }) => {
   const nav = primaryNav(page);
 
   await mountApp(page);
@@ -22,19 +22,18 @@ test("renders the mobile shell, filters timeline tabs, and opens overlays", asyn
   await expect(nav.getByRole("button", { name: "Wallet" })).toBeVisible();
   await expect(nav.getByRole("button", { name: "Notifications" })).toBeVisible();
   await expect(nav.getByRole("button", { name: "Chat" })).toBeVisible();
+  await expect(nav.locator(".nav-badge")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New cast" })).toBeVisible();
 
-  await page.getByRole("tab", { name: "portland" }).click();
+  await page.getByRole("tab", { name: "farcaster" }).click();
   await expect(
-    page.getByText("Keeping wallet actions on the bottom rail means signing")
+    page.getByText("introducing snaps. a new primitive for richer, interactive feed posts.")
   ).toBeVisible();
-  await expect(page.getByText("Feature maturity is now documented at the repo root")).toHaveCount(
-    0
-  );
+  await expect(page.getByText("Elon likes the Farcasters.")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Open search" }).click();
   await expect(page.getByRole("heading", { level: 2, name: "Quick jumps" })).toBeVisible();
-  await page.getByRole("button", { name: "wallet deck" }).click();
+  await page.locator(".overlay-sheet").getByRole("button", { name: "wallet", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Wallet" })).toBeVisible();
 
   await nav.getByRole("button", { name: "Home" }).click();
@@ -47,6 +46,24 @@ test("renders the mobile shell, filters timeline tabs, and opens overlays", asyn
   await expect(
     page.getByRole("heading", { level: 2, name: "Composer placement is in" })
   ).toHaveCount(0);
+});
+
+test("keeps the bottom nav pinned while the feed scrolls", async ({ page }) => {
+  const nav = primaryNav(page);
+
+  await mountApp(page);
+
+  const before = await nav.boundingBox();
+
+  await page.locator(".shell-content").evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+
+  const after = await nav.boundingBox();
+
+  expect(before?.y).toBeTruthy();
+  expect(after?.y).toBeTruthy();
+  expect(Math.round(after?.y ?? 0)).toBe(Math.round(before?.y ?? 0));
 });
 
 test("updates install state from the install prompt lifecycle", async ({ page }) => {
@@ -137,12 +154,12 @@ test("searches local shell content and opens matching results", async ({ page })
   await page.getByRole("button", { name: "Close account sheet" }).click();
 
   await page.getByRole("button", { name: "Open search" }).click();
-  await page.getByRole("textbox", { name: "Search Hypecast" }).fill("wallet");
-  await expect(page.getByRole("button", { name: /cast wallet deck/i })).toBeVisible();
-  await page.getByRole("button", { name: /cast wallet deck/i }).click();
-  await expect(page.getByRole("tab", { name: "portland" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("textbox", { name: "Search Hypecast" }).fill("snaps");
+  await expect(page.getByRole("button", { name: /cast Farcaster: introducing snaps/i })).toBeVisible();
+  await page.getByRole("button", { name: /cast Farcaster: introducing snaps/i }).click();
+  await expect(page.getByRole("tab", { name: "farcaster" })).toHaveAttribute("aria-selected", "true");
   await expect(
-    page.getByText("Keeping wallet actions on the bottom rail means signing")
+    page.getByText("introducing snaps. a new primitive for richer, interactive feed posts.")
   ).toBeVisible();
 });
 
@@ -176,14 +193,10 @@ test("preserves composer drafts locally and publishes a local cast after sign-in
   await expect(page.getByPlaceholder("What’s happening on Hypecast?")).toHaveValue("");
 });
 
-test("requires a wallet before XMTP bootstrap and clears the chat badge after connect", async ({
-  page
-}) => {
+test("requires a wallet before XMTP bootstrap", async ({ page }) => {
   const nav = primaryNav(page);
 
   await mountApp(page);
-
-  await expect(nav.locator(".nav-badge")).toHaveText("1");
 
   await nav.getByRole("button", { name: "Apps" }).click();
   await page.getByRole("button", { name: /^XMTP$/ }).click();
@@ -197,7 +210,6 @@ test("requires a wallet before XMTP bootstrap and clears the chat badge after co
   await page.getByRole("button", { name: "Initialize XMTP" }).click();
   await expect(page.getByRole("heading", { level: 2, name: "XMTP ready" })).toBeVisible();
   await expect(page.getByText("inbox-987654321")).toBeVisible();
-  await expect(nav.locator(".nav-badge")).toHaveCount(0);
 });
 
 test("renders notification summaries from Farcaster, wallet, and XMTP state", async ({

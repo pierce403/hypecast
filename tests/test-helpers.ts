@@ -1,6 +1,9 @@
 import { expect, type Page } from "@playwright/test";
 import type { Address } from "viem";
 
+import type { FeedSnapshot } from "../src/types";
+import { defaultFeedSnapshot } from "./feed-fixture";
+
 interface WalletMockOptions {
   error?: string;
   session?: {
@@ -39,8 +42,15 @@ interface XmtpMockOptions {
   };
 }
 
+interface FeedMockOptions {
+  delayMs?: number;
+  error?: string;
+  snapshot?: FeedSnapshot;
+}
+
 export interface HypecastMockOptions {
   isStandalone?: boolean;
+  feed?: FeedMockOptions;
   wallet?: WalletMockOptions;
   farcaster?: FarcasterMockOptions;
   xmtp?: XmtpMockOptions;
@@ -90,6 +100,23 @@ export async function mountApp(page: Page, options: HypecastMockOptions = {}): P
 
     window.__HYPECAST_TEST_API__ = {
       isStandalone: input.isStandalone,
+      loadFeedSnapshot: async () => {
+        if (input.feed?.delayMs) {
+          await sleep(input.feed.delayMs);
+        }
+
+        if (input.feed?.error) {
+          throw new Error(input.feed.error);
+        }
+
+        const snapshot = input.feed?.snapshot;
+
+        if (!snapshot) {
+          throw new Error("No feed snapshot mock configured.");
+        }
+
+        return snapshot;
+      },
       connectWallet: async () => {
         if (input.wallet?.error) {
           throw new Error(input.wallet.error);
@@ -139,10 +166,17 @@ export async function mountApp(page: Page, options: HypecastMockOptions = {}): P
         };
       }
     };
-  }, options);
+  }, {
+    ...options,
+    feed: {
+      snapshot: options.feed?.snapshot ?? defaultFeedSnapshot,
+      ...options.feed
+    }
+  });
 
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+  await expect.poll(async () => page.locator(".timeline-tab").count()).toBeGreaterThan(1);
 }
 
 export async function dispatchInstallPrompt(

@@ -15,16 +15,18 @@
   - [x] Standalone launches are detected and reflected in app state
 
 ### Logged-In Mobile Feed Shell
-- **Stability**: in-progress
-- **Description**: The signed-in app surface now mirrors a Farcaster-like mobile layout with avatar, top search affordance, bottom navigation, and floating composer placement.
+- **Stability**: stable
+- **Description**: The signed-in app surface mirrors a Farcaster-like mobile layout with avatar, top search affordance, fixed bottom navigation, floating composer placement, and a snapshot-backed real feed.
 - **Properties**:
   - Home view renders a phone-first feed shell instead of a launchpad dashboard
-  - Bottom navigation exposes home, apps, wallet, notifications, and chat surfaces
+  - Bottom navigation exposes home, apps, wallet, notifications, and chat surfaces and remains pinned while the feed scrolls
+  - Home loads `/farcaster-feed.json`, a same-origin snapshot generated from public Farcaster profile pages
   - Search and composer affordances open in-app overlays that reserve the intended interaction pattern
 - **Test Criteria**:
   - [x] Logged-in and signed-out states both render inside the same mobile shell
   - [x] Avatar, search, bottom nav, and floating compose button stay visible on mobile
-  - [ ] Live Farcaster timeline data hydrates the feed instead of local scaffold content
+  - [x] The bottom navigation stays pinned while the feed content scrolls
+  - [x] Real Farcaster snapshot data hydrates the feed instead of local scaffold content
 
 ### Farcaster Sign-In And Profile Binding
 - **Stability**: in-progress
@@ -64,9 +66,9 @@
 
 ### Search And Discovery
 - **Stability**: in-progress
-- **Description**: Search now works as a local-first discovery layer for channels, casts, profiles, and shell surfaces, with room for live Farcaster discovery later.
+- **Description**: Search now works as a local-first discovery layer for snapshot casts, profiles, and shell surfaces, with room for live network discovery later.
 - **Properties**:
-  - Query input searches local users, channels, casts, and primary shell panes
+  - Query input searches local users, snapshot sources, casts, and primary shell panes
   - Results can navigate directly into timelines, panes, and the profile sheet
   - Search state remains usable on mobile without breaking the bottom rail
 - **Test Criteria**:

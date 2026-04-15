@@ -12,7 +12,10 @@ Hypecast is a PWA-first Farcaster client scaffold built with vanilla TypeScript,
 ```bash
 npm install
 npm run dev
+npm run sync:feed
 ```
+
+`npm run sync:feed` refreshes `public/farcaster-feed.json` from public Farcaster SSR profile pages so the home feed ships with real data on the same origin.
 
 ## Environment
 
@@ -26,6 +29,7 @@ Copy `.env.example` to `.env` if you need custom settings.
 - Farcaster sign-in uses the public relay and works best when the dev server is reachable on the same device or via a tunnel.
 - XMTP browser clients rely on OPFS-backed storage, so multiple tabs using the same app instance can conflict.
 - The UI is intentionally modular: wallet, Farcaster, and XMTP each live behind dedicated service adapters in `src/services`.
+- The home feed does not hit Farcaster SSR pages directly at runtime because the browser cannot fetch them cross-origin. Refresh the committed snapshot with `npm run sync:feed` when you want newer real feed content.
 
 ## Deployment
 

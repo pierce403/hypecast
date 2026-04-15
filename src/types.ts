@@ -37,10 +37,60 @@ export interface XmtpState {
   error?: string;
 }
 
+export interface FeedMedia {
+  kind: "image" | "link";
+  src?: string;
+  alt?: string;
+  eyebrow?: string;
+  title: string;
+  description: string;
+}
+
+export interface FeedSource {
+  id: string;
+  label: string;
+  username: string;
+  displayName: string;
+  pfpUrl?: string;
+  bio?: string;
+  accentClass?: string;
+}
+
+export interface FeedCast {
+  id: string;
+  channel: string;
+  authorName: string;
+  authorHandle: string;
+  authorInitial: string;
+  authorAvatarUrl?: string;
+  accentClass?: string;
+  timestamp: number;
+  contextLabel?: string;
+  text: string;
+  permalink?: string;
+  replies?: number;
+  recasts?: number;
+  reactions?: number;
+  media?: FeedMedia;
+}
+
+export interface FeedSnapshot {
+  generatedAt: string;
+  sources: FeedSource[];
+  casts: FeedCast[];
+}
+
+export interface FeedState {
+  status: "idle" | "loading" | "ready" | "error";
+  snapshot?: FeedSnapshot;
+  error?: string;
+}
+
 export interface AppState {
   installPrompt: BeforeInstallPromptEvent | null;
   pwaInstalled: boolean;
   wallet: WalletState;
   farcaster: FarcasterState;
   xmtp: XmtpState;
+  feed: FeedState;
 }
