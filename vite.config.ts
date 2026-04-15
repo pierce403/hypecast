@@ -19,8 +19,8 @@ export default defineConfig({
         short_name: "Hypecast",
         description:
           "A PWA-first Farcaster client with wallet-native identity and XMTP messaging.",
-        theme_color: "#f25f3a",
-        background_color: "#08111d",
+        theme_color: "#0b0b0e",
+        background_color: "#0b0b0e",
         display: "standalone",
         start_url: "/",
         scope: "/",

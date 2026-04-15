@@ -2,6 +2,7 @@ import { createAppClient, viemConnector } from "@farcaster/auth-client";
 import QRCode from "qrcode";
 
 import { APP_CONFIG } from "../config";
+import { getHypecastTestApi } from "../test-support";
 import type { FarcasterProfile } from "../types";
 
 const appClient = createAppClient({
@@ -22,7 +23,19 @@ export async function createFarcasterChannel(options: {
   domain: string;
   siweUri: string;
 }): Promise<FarcasterChannel> {
+  const testApi = getHypecastTestApi();
   const nonce = createNonce();
+
+  if (testApi?.createFarcasterChannel) {
+    const response = await testApi.createFarcasterChannel(options);
+
+    return {
+      channelToken: response.channelToken,
+      url: response.url,
+      nonce: response.nonce ?? nonce
+    };
+  }
+
   const response = await appClient.createChannel({
     domain: options.domain,
     siweUri: options.siweUri,
@@ -41,6 +54,12 @@ export async function createFarcasterChannel(options: {
 }
 
 export async function createChannelQrCode(url: string): Promise<string> {
+  const testApi = getHypecastTestApi();
+
+  if (testApi?.createChannelQrCode) {
+    return testApi.createChannelQrCode(url);
+  }
+
   return QRCode.toDataURL(url, {
     margin: 1,
     width: 240,
@@ -57,6 +76,12 @@ export async function waitForFarcasterProfile(options: {
   nonce: string;
   onPoll?: () => void;
 }): Promise<FarcasterProfile> {
+  const testApi = getHypecastTestApi();
+
+  if (testApi?.waitForFarcasterProfile) {
+    return testApi.waitForFarcasterProfile(options);
+  }
+
   const status = await appClient.watchStatus({
     channelToken: options.channelToken,
     timeout: 5 * 60_000,

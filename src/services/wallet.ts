@@ -1,6 +1,8 @@
 import { custom, createWalletClient, type Address, type WalletClient } from "viem";
 import { base, mainnet, optimism } from "viem/chains";
 
+import { getHypecastTestApi } from "../test-support";
+
 export interface InjectedProvider {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
   on?: (event: string, listener: (...args: unknown[]) => void) => void;
@@ -34,6 +36,22 @@ function getInjectedProvider(): InjectedProvider {
 }
 
 export async function connectWallet(): Promise<WalletSession> {
+  const testApi = getHypecastTestApi();
+
+  if (testApi?.connectWallet) {
+    const session = await testApi.connectWallet();
+
+    return {
+      address: session.address,
+      chainId: session.chainId,
+      chainName: session.chainName,
+      provider: {
+        request: async () => null
+      },
+      client: {} as WalletClient
+    };
+  }
+
   const provider = getInjectedProvider();
 
   await provider.request({ method: "eth_requestAccounts" });

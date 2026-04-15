@@ -2,6 +2,7 @@ import { Client, IdentifierKind, createBackend } from "@xmtp/browser-sdk";
 import { toBytes, type Address } from "viem";
 
 import { APP_CONFIG } from "../config";
+import { getHypecastTestApi } from "../test-support";
 import type { WalletSession } from "./wallet";
 
 export interface XmtpSession {
@@ -15,6 +16,25 @@ export async function connectXmtp(
   wallet: WalletSession,
   address: Address
 ): Promise<XmtpSession> {
+  const testApi = getHypecastTestApi();
+
+  if (testApi?.connectXmtp) {
+    const session = await testApi.connectXmtp({
+      address,
+      chainId: wallet.chainId,
+      chainName: wallet.chainName
+    });
+
+    return {
+      inboxId: session.inboxId,
+      accountIdentifier: session.accountIdentifier,
+      installationId: session.installationId ?? "test-installation",
+      client: {
+        close: () => {}
+      } as Client<unknown>
+    };
+  }
+
   type CreateClientOptions = Parameters<typeof Client.create>[1];
 
   const signer = {
