@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import {
   defaultWalletAddress,
@@ -7,6 +7,11 @@ import {
   primaryNav,
   shortAddress
 } from "./test-helpers";
+
+async function signInWithFarcaster(page: Page) {
+  await page.getByRole("button", { name: "Open account", exact: true }).click();
+  await page.locator(".overlay-sheet").getByRole("button", { name: "Sign In With Farcaster" }).click();
+}
 
 test("renders the mobile shell, filters snapshot tabs, and opens overlays", async ({ page }) => {
   const nav = primaryNav(page);
@@ -24,6 +29,8 @@ test("renders the mobile shell, filters snapshot tabs, and opens overlays", asyn
   await expect(nav.getByRole("button", { name: "Chat" })).toBeVisible();
   await expect(nav.locator(".nav-badge")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New cast" })).toBeVisible();
+  await expect(page.getByText("identity bridge")).toHaveCount(0);
+  await expect(page.getByText("Sign in with Farcaster to replace the placeholder chrome")).toHaveCount(0);
 
   await page.getByRole("tab", { name: "farcaster" }).click();
   await expect(
@@ -52,8 +59,13 @@ test("keeps the bottom nav pinned while the feed scrolls", async ({ page }) => {
   const nav = primaryNav(page);
 
   await mountApp(page);
+  const viewport = page.viewportSize();
 
   const before = await nav.boundingBox();
+  const pageMetricsBefore = await page.evaluate(() => ({
+    scrollHeight: document.scrollingElement?.scrollHeight ?? 0,
+    clientHeight: document.scrollingElement?.clientHeight ?? 0
+  }));
 
   await page.locator(".shell-content").evaluate((node) => {
     node.scrollTop = node.scrollHeight;
@@ -64,6 +76,8 @@ test("keeps the bottom nav pinned while the feed scrolls", async ({ page }) => {
   expect(before?.y).toBeTruthy();
   expect(after?.y).toBeTruthy();
   expect(Math.round(after?.y ?? 0)).toBe(Math.round(before?.y ?? 0));
+  expect(pageMetricsBefore.scrollHeight - pageMetricsBefore.clientHeight).toBeLessThanOrEqual(2);
+  expect((after?.y ?? 0) + (after?.height ?? 0)).toBeLessThanOrEqual((viewport?.height ?? 0) + 1);
 });
 
 test("updates install state from the install prompt lifecycle", async ({ page }) => {
@@ -117,34 +131,35 @@ test("signs in with Farcaster, shows the pending QR state, and binds the profile
     }
   });
 
-  await page.getByRole("button", { name: "Sign In With Farcaster" }).click();
+  await signInWithFarcaster(page);
 
   await expect(page.getByAltText("Farcaster sign-in QR code")).toBeVisible();
   await expect(page.getByRole("link", { name: "Open deep link" })).toBeVisible();
   await expect(page.getByText("Scan the QR code or open the deep link")).toBeVisible();
-  await expect(page.getByText("Ada Lovelace is live in the shell")).toBeVisible();
-
-  await page.getByRole("button", { name: "Open account", exact: true }).click();
   await expect(page.getByRole("heading", { level: 2, name: "Ada Lovelace" })).toBeVisible();
+
   await expect(page.locator(".overlay-sheet").getByText("@ada", { exact: true })).toBeVisible();
 });
 
 test("persists the Farcaster profile across reloads", async ({ page }) => {
   await mountApp(page);
 
-  await page.getByRole("button", { name: "Sign In With Farcaster" }).click();
-  await expect(page.getByText("Ada Lovelace is live in the shell")).toBeVisible();
+  await signInWithFarcaster(page);
+  await expect(page.getByRole("heading", { level: 2, name: "Ada Lovelace" })).toBeVisible();
+  await page.getByRole("button", { name: "Close account sheet" }).click();
 
   await page.reload();
-  await expect(page.getByText("Ada Lovelace is live in the shell")).toBeVisible();
+  await page.getByRole("button", { name: "Open account", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "Ada Lovelace" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign In With Farcaster" })).toHaveCount(0);
 });
 
 test("searches local shell content and opens matching results", async ({ page }) => {
   await mountApp(page);
 
-  await page.getByRole("button", { name: "Sign In With Farcaster" }).click();
-  await expect(page.getByText("Ada Lovelace is live in the shell")).toBeVisible();
+  await signInWithFarcaster(page);
+  await expect(page.getByRole("heading", { level: 2, name: "Ada Lovelace" })).toBeVisible();
+  await page.getByRole("button", { name: "Close account sheet" }).click();
 
   await page.getByRole("button", { name: "Open search" }).click();
   await page.getByRole("textbox", { name: "Search Hypecast" }).fill("ada");
@@ -180,8 +195,9 @@ test("preserves composer drafts locally and publishes a local cast after sign-in
   await expect(page.getByRole("button", { name: "Sign in to publish" })).toBeDisabled();
   await page.getByRole("button", { name: "Close composer" }).click();
 
-  await page.getByRole("button", { name: "Sign In With Farcaster" }).click();
-  await expect(page.getByText("Ada Lovelace is live in the shell")).toBeVisible();
+  await signInWithFarcaster(page);
+  await expect(page.getByRole("heading", { level: 2, name: "Ada Lovelace" })).toBeVisible();
+  await page.getByRole("button", { name: "Close account sheet" }).click();
 
   await page.getByRole("button", { name: "New cast" }).click();
   await expect(page.getByPlaceholder("What’s happening on Hypecast?")).toHaveValue(draft);
@@ -220,8 +236,9 @@ test("renders notification summaries from Farcaster, wallet, and XMTP state", as
 
   await mountApp(page);
 
-  await page.getByRole("button", { name: "Sign In With Farcaster" }).click();
-  await expect(page.getByText("Ada Lovelace is live in the shell")).toBeVisible();
+  await signInWithFarcaster(page);
+  await expect(page.getByRole("heading", { level: 2, name: "Ada Lovelace" })).toBeVisible();
+  await page.getByRole("button", { name: "Close account sheet" }).click();
 
   await nav.getByRole("button", { name: "Wallet" }).click();
   await page.getByRole("button", { name: "Connect wallet" }).click();

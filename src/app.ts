@@ -619,105 +619,6 @@ function renderFeedActions(): string {
   `;
 }
 
-function renderAuthCard(state: AppState): string {
-  const label =
-    state.farcaster.status === "connected" ? "Refresh Farcaster Session" : "Sign In With Farcaster";
-
-  return `
-    <article class="feed-card auth-card">
-      <div class="feed-header">
-        <div class="feed-avatar-wrap auth-avatar">${renderIcon("sparkle")}</div>
-        <div class="feed-main">
-          <div class="author-row">
-            <strong>identity bridge</strong>
-            <span class="author-meta">${escapeHtml(stateLabel(state.farcaster.status))}</span>
-          </div>
-          <p class="cast-text">${escapeHtml(describeFarcaster(state.farcaster))}</p>
-          <div class="inline-actions">
-            <button class="primary-button" type="button" data-action="farcaster">${escapeHtml(label)}</button>
-            <button class="secondary-button" type="button" data-action="profile">Open account sheet</button>
-          </div>
-        </div>
-      </div>
-      ${
-        state.farcaster.qrCodeDataUrl
-          ? `
-            <div class="qr-inline-card">
-              <img src="${escapeAttribute(state.farcaster.qrCodeDataUrl)}" alt="Farcaster sign-in QR code" />
-              <div>
-                <p class="eyebrow-label">scan from your phone</p>
-                <p class="support-copy">Use Warpcast or another Farcaster wallet to complete the sign-in flow.</p>
-                ${
-                  state.farcaster.channelUrl
-                    ? `<a class="text-link" href="${escapeAttribute(state.farcaster.channelUrl)}" target="_blank" rel="noreferrer">Open deep link</a>`
-                    : ""
-                }
-              </div>
-            </div>
-          `
-          : ""
-      }
-    </article>
-  `;
-}
-
-function renderIdentityCard(state: AppState): string {
-  const profile = state.farcaster.profile;
-  const walletValue =
-    state.wallet.status === "connected" && state.wallet.address
-      ? shortAddress(state.wallet.address)
-      : "tap wallet";
-  const xmtpValue =
-    state.xmtp.status === "connected" && state.xmtp.inboxId
-      ? `${state.xmtp.inboxId.slice(0, 8)}...`
-      : state.xmtp.status === "connecting"
-        ? "warming"
-        : "offline";
-
-  return `
-    <article class="feed-card">
-      <div class="feed-header">
-        <div class="feed-avatar-wrap">
-          ${renderAvatar(profile, "feed-avatar", "feed-avatar feed-avatar-fallback")}
-        </div>
-        <div class="feed-main">
-          <div class="author-row">
-            <strong>${escapeHtml(profileName(profile))}</strong>
-            <span class="author-meta">${escapeHtml(profileHandle(profile))}</span>
-            <span class="author-meta">now</span>
-          </div>
-          <p class="cast-text">
-            ${
-              profile
-                ? `${escapeHtml(profileName(profile))} is live in the shell. The chrome now matches the signed-in Farcaster posture while wallet and XMTP actions stay one tap away.`
-                : "Sign in with Farcaster to replace the placeholder chrome with your profile, then connect wallet and XMTP from the bottom rail."
-            }
-          </p>
-          ${renderStatusCapsules(state)}
-          <div class="identity-preview">
-            <div>
-              <span class="preview-label">wallet</span>
-              <strong>${escapeHtml(walletValue)}</strong>
-            </div>
-            <div>
-              <span class="preview-label">xmtp</span>
-              <strong>${escapeHtml(xmtpValue)}</strong>
-            </div>
-            <div>
-              <span class="preview-label">install</span>
-              <strong>${state.pwaInstalled ? "ready" : "available"}</strong>
-            </div>
-          </div>
-        </div>
-        <button class="icon-button subtle-button" type="button" data-action="profile" aria-label="Open account sheet">
-          ${renderIcon("more")}
-        </button>
-      </div>
-      ${renderFeedActions()}
-    </article>
-  `;
-}
-
 function renderFeedMedia(media: FeedCast["media"]): string {
   if (!media) {
     return "";
@@ -915,14 +816,6 @@ function renderHomePane(state: AppState, ui: UiState): string {
       : allCasts.filter((cast) => cast.channel === ui.activeTimeline);
 
   const cards: string[] = [];
-
-  if (ui.activeTimeline === feedAggregateTab.id) {
-    if (state.farcaster.status !== "connected") {
-      cards.push(renderAuthCard(state));
-    }
-
-    cards.push(renderIdentityCard(state));
-  }
 
   if (state.feed.status === "loading" && filteredCasts.length === 0) {
     cards.push(`
@@ -1220,6 +1113,36 @@ function renderSearchOverlay(state: AppState, ui: UiState): string {
   `;
 }
 
+function renderFarcasterRelayCard(state: AppState): string {
+  if (state.farcaster.status === "connected" && !state.farcaster.qrCodeDataUrl) {
+    return "";
+  }
+
+  return `
+    <div class="sheet-auth-card">
+      <p class="support-copy farcaster-status-copy">${escapeHtml(describeFarcaster(state.farcaster))}</p>
+      ${
+        state.farcaster.qrCodeDataUrl
+          ? `
+            <div class="sheet-qr-card">
+              <img src="${escapeAttribute(state.farcaster.qrCodeDataUrl)}" alt="Farcaster sign-in QR code" />
+              <div>
+                <p class="eyebrow-label">scan from your phone</p>
+                <p class="support-copy">Use Warpcast or another Farcaster wallet to complete the sign-in flow.</p>
+                ${
+                  state.farcaster.channelUrl
+                    ? `<a class="text-link" href="${escapeAttribute(state.farcaster.channelUrl)}" target="_blank" rel="noreferrer">Open deep link</a>`
+                    : ""
+                }
+              </div>
+            </div>
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
 function renderProfileOverlay(state: AppState): string {
   const profile = state.farcaster.profile;
 
@@ -1250,6 +1173,7 @@ function renderProfileOverlay(state: AppState): string {
             </p>
           </div>
         </div>
+        ${renderFarcasterRelayCard(state)}
         ${renderStatusCapsules(state)}
         <div class="mini-list">
           <div class="mini-item">
@@ -1263,7 +1187,7 @@ function renderProfileOverlay(state: AppState): string {
         </div>
         <div class="action-grid">
           <button class="primary-button" type="button" data-action="farcaster">
-            ${state.farcaster.status === "connected" ? "Refresh Farcaster" : "Sign in"}
+            ${state.farcaster.status === "connected" ? "Refresh Farcaster" : "Sign In With Farcaster"}
           </button>
           <button class="secondary-button" type="button" data-action="wallet">Wallet</button>
           <button class="secondary-button" type="button" data-action="xmtp">XMTP</button>
@@ -1574,7 +1498,6 @@ export function createApp(root: HTMLDivElement): void {
     const siweUri = new URL("/auth/farcaster", window.location.origin).toString();
     const existingProfile = state.farcaster.profile;
 
-    ui.overlay = "none";
     setPartialState({
       farcaster: {
         status: "creating",

@@ -83,6 +83,7 @@ Notes:
 - Keep the signed-in experience inside the phone-shell UI in `src/app.ts` / `src/styles.css`. Wallet, Farcaster, XMTP, and install actions should stay reachable from panes or overlays within that shell instead of reintroducing a separate dashboard.
 - Search, draft composer state, locally published casts, and the persisted Farcaster profile currently live in `src/app.ts` via `localStorage`. If you change those flows, update the storage behavior and the E2E coverage together.
 - Keep the bottom nav outside the `.shell-content` scroll container. The intended behavior is a pinned shell footer while only the feed/pane content scrolls.
+- Keep the Home timeline free of synthetic placeholder cards. Account/status controls belong in panes or overlays; the feed itself should start with real snapshot or local casts.
 
 ## Dependencies That Matter
 
@@ -102,6 +103,7 @@ Notes:
 - Farcaster auth via the public relay works best when the app is reachable from the signing device. On local dev, use `--host 0.0.0.0` or a tunnel if mobile sign-in is failing.
 - The XMTP SDK typings currently require a small adapter/cast when creating the client with a custom backend. Be careful upgrading that package, because the runtime behavior and the exported TypeScript shapes are not perfectly aligned.
 - The browser app cannot fetch `https://ssr.farcaster.xyz/*` directly because of cross-origin restrictions. If the home feed needs fresher real data, update the committed snapshot with `npm run sync:feed` instead of wiring runtime fetches to SSR pages.
+- If the bottom nav drifts below the fold again, inspect `html`, `body`, `#app`, `.app-shell`, and `.phone-shell` first. The shell depends on viewport-locked `100dvh` sizing plus `body { overflow: hidden; }`.
 
 ## Deployment Notes
 
@@ -125,6 +127,7 @@ Notes:
 - The Playwright config targets a mobile Chromium profile and blocks service workers to keep the shell tests deterministic.
 - The app rerenders the shell from `root.innerHTML`, so any live text inputs added to overlays need explicit focus restoration after render, or typing/search will break.
 - Playwright defaults now include a mocked feed snapshot; if you change timeline tabs or feed copy, update `tests/feed-fixture.ts` and the corresponding E2E assertions together.
+- The profile/account overlay now owns the Farcaster QR and deep-link handoff. If you change the auth flow, keep that overlay scrollable on mobile so the close button and QR stay reachable.
 - If you learn a new repo-specific command, deployment quirk, or SDK hazard, add it here before finishing the task.
 
 ## Rapport & Reflection

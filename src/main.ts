@@ -3,7 +3,12 @@ import { registerSW } from "virtual:pwa-register";
 import "./styles.css";
 import { createApp } from "./app";
 
-registerSW({ immediate: true });
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    void updateSW(true);
+  }
+});
 
 const root = document.querySelector<HTMLDivElement>("#app");
 
