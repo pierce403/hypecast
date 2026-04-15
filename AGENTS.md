@@ -40,6 +40,8 @@ npm run typecheck
 npm run build
 npx playwright install chromium
 npm run test:e2e
+gh run list --workflow deploy-pages.yml --limit 1
+gh run watch <run-id> --exit-status
 ```
 
 Notes:
@@ -48,6 +50,7 @@ Notes:
 - `npm run dev -- --host 0.0.0.0` is useful for testing Farcaster sign-in from another device on the same network.
 - `npm run sync:feed` refreshes `public/farcaster-feed.json` from the configured Farcaster SSR profile sources.
 - `npm run test:e2e` runs the Playwright suite against a local Vite server on `127.0.0.1:4173`.
+- After every push to `main`, check the latest `deploy-pages.yml` run and wait for it to finish with `gh run watch <run-id> --exit-status`.
 - Install the Playwright browser runtime with `npx playwright install chromium` after adding or refreshing the dependency.
 
 ## Project Structure
@@ -107,6 +110,7 @@ Notes:
 - The custom domain is `hypecast.net`.
 - HTTPS enforcement is enabled on the GitHub Pages site.
 - The deploy workflow builds `dist/` and uploads it as the Pages artifact.
+- The expected post-push verification flow is: push, get the newest `deploy-pages.yml` run ID, then wait on it with `gh run watch <run-id> --exit-status`.
 - `dist/` is build output and should stay ignored locally.
 
 ## Agent Tips
@@ -127,6 +131,7 @@ Notes:
 
 - The collaborator prefers direct progress over long planning.
 - The collaborator wants each completed task committed and pushed to the remote instead of leaving local-only work behind.
+- The collaborator also wants post-push deploy status checked every time instead of assuming GitHub Pages succeeded.
 - Product direction so far: PWA first, mobile-friendly, accessible on web, wallet-native, Farcaster-integrated, XMTP-capable.
 - Keep responses concise and execution-oriented.
 - Update this file when collaborator preferences or product direction become clearer.
