@@ -651,9 +651,11 @@ code {
 }
 
 .bottom-nav {
-  position: relative;
+  position: sticky;
+  bottom: 0;
   z-index: 2;
   flex-shrink: 0;
+  margin-top: auto;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   padding: 10px 8px calc(12px + env(safe-area-inset-bottom, 0px));

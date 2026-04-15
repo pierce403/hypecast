@@ -104,6 +104,7 @@ Notes:
 - The XMTP SDK typings currently require a small adapter/cast when creating the client with a custom backend. Be careful upgrading that package, because the runtime behavior and the exported TypeScript shapes are not perfectly aligned.
 - The browser app cannot fetch `https://ssr.farcaster.xyz/*` directly because of cross-origin restrictions. If the home feed needs fresher real data, update the committed snapshot with `npm run sync:feed` instead of wiring runtime fetches to SSR pages.
 - If the bottom nav drifts below the fold again, inspect `html`, `body`, `#app`, `.app-shell`, and `.phone-shell` first. The shell depends on viewport-locked `100dvh` sizing plus `body { overflow: hidden; }`.
+- Keep `.bottom-nav` sticky with `bottom: 0` and `margin-top: auto` so it stays anchored to the phone shell edge while only `.shell-content` scrolls.
 
 ## Deployment Notes
 
