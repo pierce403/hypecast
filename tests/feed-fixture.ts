@@ -44,6 +44,7 @@ export const defaultFeedSnapshot: FeedSnapshot = {
     {
       id: "cast-farcaster-snaps",
       channel: "farcaster",
+      authorFid: 3,
       authorName: "Farcaster",
       authorHandle: "farcaster",
       authorInitial: "F",
@@ -66,6 +67,7 @@ export const defaultFeedSnapshot: FeedSnapshot = {
     {
       id: "cast-v-elon",
       channel: "v",
+      authorFid: 5650,
       authorName: "Varun Srinivasan",
       authorHandle: "v",
       authorInitial: "V",
@@ -85,6 +87,7 @@ export const defaultFeedSnapshot: FeedSnapshot = {
     {
       id: "cast-dwr-lol",
       channel: "dwr",
+      authorFid: 99,
       authorName: "Dan Romero",
       authorHandle: "dwr",
       authorInitial: "D",
@@ -104,6 +107,7 @@ export const defaultFeedSnapshot: FeedSnapshot = {
     {
       id: "cast-base-build",
       channel: "base",
+      authorFid: 8453,
       authorName: "Base",
       authorHandle: "base.base.eth",
       authorInitial: "B",
@@ -126,6 +130,7 @@ export const defaultFeedSnapshot: FeedSnapshot = {
     {
       id: "cast-dwr-photo",
       channel: "dwr",
+      authorFid: 99,
       authorName: "Dan Romero",
       authorHandle: "dwr",
       authorInitial: "D",
@@ -147,6 +152,7 @@ export const defaultFeedSnapshot: FeedSnapshot = {
     {
       id: "cast-v-video",
       channel: "v",
+      authorFid: 5650,
       authorName: "Varun Srinivasan",
       authorHandle: "v",
       authorInitial: "V",
@@ -169,6 +175,7 @@ export const defaultFeedSnapshot: FeedSnapshot = {
     {
       id: "cast-farcaster-clients",
       channel: "farcaster",
+      authorFid: 3,
       authorName: "Farcaster",
       authorHandle: "farcaster",
       authorInitial: "F",
@@ -181,6 +188,7 @@ export const defaultFeedSnapshot: FeedSnapshot = {
     {
       id: "cast-v-launch",
       channel: "v",
+      authorFid: 5650,
       authorName: "Varun Srinivasan",
       authorHandle: "v",
       authorInitial: "V",

@@ -229,6 +229,75 @@ test("reply, recast, and like buttons update cast state", async ({ page }) => {
   await expect(replyButton.locator(".feed-action-count")).toHaveText("5");
 });
 
+test("opens the cast menu and applies local delete, copy link, mute, and block actions", async ({ page }) => {
+  const main = shellMain(page);
+
+  await page.addInitScript(() => {
+    let clipboardText = "";
+
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (value: string) => {
+          clipboardText = value;
+          (window as Window & { __hypecastClipboard?: string }).__hypecastClipboard = clipboardText;
+        }
+      }
+    });
+  });
+
+  await mountApp(page);
+
+  await page.getByRole("tab", { name: "farcaster" }).click();
+  await main.locator('[data-action="open-cast-menu"][data-cast-id="cast-farcaster-snaps"]').click();
+  await expect(overlaySheet(page).getByRole("button", { name: "Delete" })).toBeVisible();
+  await expect(overlaySheet(page).getByRole("button", { name: "Copy link" })).toBeVisible();
+  await expect(overlaySheet(page).getByRole("button", { name: "Mute @farcaster" })).toBeVisible();
+  await expect(overlaySheet(page).getByRole("button", { name: "Block @farcaster" })).toBeVisible();
+
+  await overlaySheet(page).getByRole("button", { name: "Copy link" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => (window as Window & { __hypecastClipboard?: string }).__hypecastClipboard ?? "")
+    )
+    .toContain("cast=cast-farcaster-snaps");
+  await expect
+    .poll(async () =>
+      page.evaluate(() => (window as Window & { __hypecastClipboard?: string }).__hypecastClipboard ?? "")
+    )
+    .toContain("fid=3");
+
+  await main.locator('[data-action="open-cast-menu"][data-cast-id="cast-farcaster-snaps"]').click();
+  await overlaySheet(page).getByRole("button", { name: "Delete" }).click();
+  await expect(main.getByText("introducing snaps. a new primitive for richer, interactive feed posts.")).toHaveCount(0);
+  await expect(main.getByText("clients can now render richer post actions without leaving the feed.")).toBeVisible();
+
+  await main.locator('[data-action="open-cast-menu"][data-cast-id="cast-farcaster-clients"]').click();
+  await overlaySheet(page).getByRole("button", { name: "Mute @farcaster" }).click();
+  await expect(main.getByText("clients can now render richer post actions without leaving the feed.")).toHaveCount(0);
+  await expect(main.getByRole("heading", { level: 2, name: "No recent casts are available for this tab." })).toBeVisible();
+
+  await page.getByRole("tab", { name: "v" }).click();
+  await main.locator('[data-action="open-cast-menu"][data-cast-id="cast-v-elon"]').click();
+  await overlaySheet(page).getByRole("button", { name: "Block @v" }).click();
+  await expect(main.getByText("Elon likes the Farcasters.")).toHaveCount(0);
+  await expect(main.getByText("shipping another round of protocol and app performance work.")).toHaveCount(0);
+});
+
+test("routes cast links from query params into the feed shell", async ({ page }) => {
+  const main = shellMain(page);
+
+  await mountApp(page, {}, "/?fid=3&cast=cast-farcaster-snaps");
+
+  await expect(main.getByText("Showing the requested cast at the top of the feed.")).toBeVisible();
+  await expect(main.getByText("introducing snaps. a new primitive for richer, interactive feed posts.")).toBeVisible();
+  await expect(page.getByRole("tab", { name: "farcaster" })).toHaveAttribute("aria-selected", "true");
+
+  await main.getByRole("button", { name: "Clear route" }).click();
+  await expect(main.getByText("Showing the requested cast at the top of the feed.")).toHaveCount(0);
+  await expect(page).toHaveURL(/^(?!.*[?&]cast=).*$/);
+});
+
 test("refuses to render unsafe remote feed URLs", async ({ page }) => {
   const main = shellMain(page);
 

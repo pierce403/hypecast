@@ -62,6 +62,7 @@ export interface FeedSource {
 export interface FeedCast {
   id: string;
   channel: string;
+  authorFid?: number;
   authorName: string;
   authorHandle: string;
   authorInitial: string;

@@ -8,10 +8,12 @@ import {
   clearStoredNeynarApiKey,
   getDefaultNeynarApiKey,
   getEffectiveNeynarApiKey,
+  loadCastByIdentifier,
   loadFeedSnapshot,
   loadStoredNeynarApiKey,
   saveStoredNeynarApiKey
 } from "./services/feed";
+import { buildCastRouteUrl, parseCastRouteFromLocation } from "./services/routes";
 import {
   escapeAttribute,
   escapeHtml,
@@ -37,7 +39,7 @@ declare const __HYPECAST_BUILD_TIME__: string;
 
 type NavPane = "home" | "apps" | "wallet" | "notifications" | "chat";
 type TimelineTab = string;
-type Overlay = "none" | "profile" | "search" | "composer" | "settings" | "media";
+type Overlay = "none" | "profile" | "search" | "composer" | "settings" | "media" | "cast-menu";
 type IconName =
   | "apps"
   | "bell"
@@ -78,6 +80,11 @@ interface UiState {
   activeTimeline: TimelineTab;
   overlay: Overlay;
   mediaViewer?: MediaViewerState;
+  activeCastId?: string;
+  routedCast?: FeedCast;
+  mutedAuthors: string[];
+  blockedAuthors: string[];
+  dismissedCastIds: string[];
   searchQuery: string;
   composerDraft: string;
   localCasts: FeedCast[];
@@ -114,7 +121,10 @@ const STORAGE_KEYS = {
   farcasterProfile: "hypecast:farcaster-profile",
   composerDraft: "hypecast:composer-draft",
   localCasts: "hypecast:local-casts",
-  feedInteractions: "hypecast:feed-interactions"
+  feedInteractions: "hypecast:feed-interactions",
+  mutedAuthors: "hypecast:muted-authors",
+  blockedAuthors: "hypecast:blocked-authors",
+  dismissedCastIds: "hypecast:dismissed-cast-ids"
 } as const;
 
 const feedAggregateTab = {
@@ -169,6 +179,29 @@ function removeStoredValue(key: string): void {
   }
 }
 
+function normalizeStoredStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return [...new Set(value.map((entry) => String(entry ?? "").trim()).filter(Boolean))];
+}
+
+function loadStoredStringList(key: string): string[] {
+  return normalizeStoredStringList(loadStoredJson<unknown>(key));
+}
+
+function saveStoredStringList(key: string, value: string[]): void {
+  const nextValue = [...new Set(value.map((entry) => entry.trim()).filter(Boolean))];
+
+  if (nextValue.length === 0) {
+    removeStoredValue(key);
+    return;
+  }
+
+  saveStoredJson(key, nextValue);
+}
+
 function loadStoredProfile(): FarcasterProfile | undefined {
   const profile = loadStoredJson<FarcasterProfile>(STORAGE_KEYS.farcasterProfile);
 
@@ -207,6 +240,11 @@ function saveStoredComposerDraft(draft: string): void {
   } catch {
     // Ignore storage failures and keep the app usable.
   }
+}
+
+function authorStorageKey(value: string | undefined): string | undefined {
+  const nextValue = value?.trim().replace(/^@+/, "").toLowerCase();
+  return nextValue || undefined;
 }
 
 function normalizeStoredMedia(value: unknown): FeedCast["media"] {
@@ -306,6 +344,7 @@ function normalizeStoredCast(value: unknown): FeedCast | null {
   return {
     id: candidate.id,
     channel: candidate.channel,
+    authorFid: typeof candidate.authorFid === "number" ? candidate.authorFid : undefined,
     authorName: candidate.authorName,
     authorHandle:
       typeof candidate.authorHandle === "string"
@@ -479,6 +518,11 @@ function getInitialUiState(): UiState {
     activeTimeline: "following",
     overlay: "none",
     mediaViewer: undefined,
+    activeCastId: undefined,
+    routedCast: undefined,
+    mutedAuthors: loadStoredStringList(STORAGE_KEYS.mutedAuthors).map((entry) => entry.toLowerCase()),
+    blockedAuthors: loadStoredStringList(STORAGE_KEYS.blockedAuthors).map((entry) => entry.toLowerCase()),
+    dismissedCastIds: loadStoredStringList(STORAGE_KEYS.dismissedCastIds),
     searchQuery: "",
     composerDraft: loadStoredComposerDraft(),
     localCasts: loadStoredLocalCasts(),
@@ -638,8 +682,26 @@ function getTimelineTabs(snapshot?: FeedSnapshot): Array<{ id: TimelineTab; labe
   ];
 }
 
+function isAuthorSuppressed(ui: UiState, cast: FeedCast): boolean {
+  const authorKey = authorStorageKey(cast.authorHandle);
+
+  if (!authorKey) {
+    return false;
+  }
+
+  return ui.mutedAuthors.includes(authorKey) || ui.blockedAuthors.includes(authorKey);
+}
+
+function isCastSuppressed(ui: UiState, cast: FeedCast): boolean {
+  return ui.dismissedCastIds.includes(cast.id) || isAuthorSuppressed(ui, cast);
+}
+
 function getAllFeedCasts(state: AppState, ui: UiState): FeedCast[] {
   return [...ui.localCasts, ...(state.feed.snapshot?.casts ?? [])];
+}
+
+function getVisibleFeedCasts(state: AppState, ui: UiState): FeedCast[] {
+  return getAllFeedCasts(state, ui).filter((cast) => !isCastSuppressed(ui, cast));
 }
 
 function getCastById(state: AppState, ui: UiState, castId: string | undefined): FeedCast | undefined {
@@ -647,7 +709,14 @@ function getCastById(state: AppState, ui: UiState, castId: string | undefined): 
     return undefined;
   }
 
-  return getAllFeedCasts(state, ui).find((cast) => cast.id === castId);
+  return (
+    getAllFeedCasts(state, ui).find((cast) => cast.id === castId) ??
+    (ui.routedCast?.id === castId ? ui.routedCast : undefined)
+  );
+}
+
+function getActiveCast(state: AppState, ui: UiState): FeedCast | undefined {
+  return getCastById(state, ui, ui.activeCastId);
 }
 
 function getReplyTargetCast(state: AppState, ui: UiState): FeedCast | undefined {
@@ -733,6 +802,7 @@ function buildLocalCast(state: AppState, ui: UiState, text: string): FeedCast {
   return {
     id: `local-${Date.now()}`,
     channel,
+    authorFid: profile?.fid,
     authorName: profileName(profile),
     authorHandle: profile?.username ?? "guest",
     authorInitial: profileInitial(profile),
@@ -865,6 +935,7 @@ function renderDesktopStatusRow(label: string, detail: string, tone: string): st
 function renderDesktopStartRail(state: AppState, ui: UiState): string {
   const tabs = getTimelineTabs(state.feed.snapshot).slice(0, 5);
   const feedMode = state.feed.snapshot?.mode === "following" ? "Personal following" : "Public fallback";
+  const visibleCasts = getVisibleFeedCasts(state, ui);
 
   return `
     <aside class="desktop-rail desktop-rail-start">
@@ -893,7 +964,7 @@ function renderDesktopStartRail(state: AppState, ui: UiState): string {
           </div>
           <div class="desktop-stat">
             <span>Casts loaded</span>
-            <strong>${escapeHtml(String(getAllFeedCasts(state, ui).length))}</strong>
+            <strong>${escapeHtml(String(visibleCasts.length))}</strong>
           </div>
         </div>
         <div class="desktop-chip-row" aria-hidden="true">
@@ -907,7 +978,7 @@ function renderDesktopStartRail(state: AppState, ui: UiState): string {
 }
 
 function renderDesktopEndRail(state: AppState, ui: UiState): string {
-  const featuredCast = getAllFeedCasts(state, ui)[0];
+  const featuredCast = getVisibleFeedCasts(state, ui)[0];
 
   return `
     <aside class="desktop-rail desktop-rail-end">
@@ -1319,7 +1390,6 @@ function renderFeedMedia(media: FeedCast["media"]): string {
 
 function renderFeedCast(cast: FeedCast, state: AppState, ui: UiState): string {
   const safeAvatarUrl = sanitizeImageUrl(cast.authorAvatarUrl);
-  const safePermalink = sanitizeLinkUrl(cast.permalink);
 
   return `
     <article class="feed-card">
@@ -1344,11 +1414,15 @@ function renderFeedCast(cast: FeedCast, state: AppState, ui: UiState): string {
           <p class="cast-text">${escapeHtml(cast.text)}</p>
           ${renderFeedMedia(cast.media)}
         </div>
-        ${
-          safePermalink
-            ? `<a class="feed-menu" href="${escapeAttribute(safePermalink)}" target="_blank" rel="noreferrer" aria-label="Open cast">${renderIcon("more")}</a>`
-            : `<span class="feed-menu" aria-hidden="true">${renderIcon("more")}</span>`
-        }
+        <button
+          class="feed-menu"
+          type="button"
+          data-action="open-cast-menu"
+          data-cast-id="${escapeAttribute(cast.id)}"
+          aria-label="Open cast menu"
+        >
+          ${renderIcon("more")}
+        </button>
       </div>
       ${renderFeedActions(cast, state, ui)}
     </article>
@@ -1363,7 +1437,7 @@ function getSearchResults(state: AppState, ui: UiState): SearchResult[] {
   }
 
   const results: SearchResult[] = [];
-  const allCasts = getAllFeedCasts(state, ui);
+  const allCasts = getVisibleFeedCasts(state, ui);
 
   getTimelineTabs(state.feed.snapshot).forEach((tab) => {
     if (normalizeSearch(tab.label).includes(query)) {
@@ -1474,16 +1548,47 @@ function renderEmptyTimeline(activeTimeline: TimelineTab, snapshot?: FeedSnapsho
   `;
 }
 
+function renderRoutedCastBanner(cast: FeedCast): string {
+  const safePermalink = sanitizeLinkUrl(cast.permalink);
+
+  return `
+    <article class="feed-card route-banner">
+      <div>
+        <p class="eyebrow-label">opened from link</p>
+        <h2>Showing the requested cast at the top of the feed.</h2>
+        <p class="support-copy">Close it to return to the normal timeline flow.</p>
+      </div>
+      <div class="route-banner-actions">
+        ${
+          safePermalink
+            ? `<a class="secondary-button" href="${escapeAttribute(safePermalink)}" target="_blank" rel="noreferrer">Open original</a>`
+            : ""
+        }
+        <button class="secondary-button" type="button" data-action="clear-route">Clear route</button>
+      </div>
+    </article>
+  `;
+}
+
 function renderHomePane(state: AppState, ui: UiState): string {
-  const allCasts = getAllFeedCasts(state, ui);
+  const routedCast = ui.routedCast;
+  const visibleCasts = getVisibleFeedCasts(state, ui);
   const filteredCasts =
     ui.activeTimeline === feedAggregateTab.id
-      ? allCasts
-      : allCasts.filter((cast) => cast.channel === ui.activeTimeline);
+      ? visibleCasts
+      : visibleCasts.filter((cast) => cast.channel === ui.activeTimeline);
+  const timelineCasts = routedCast
+    ? filteredCasts.filter((cast) => cast.id !== routedCast.id)
+    : filteredCasts;
 
   const cards: string[] = [];
 
-  if (state.feed.status === "loading" && filteredCasts.length === 0) {
+  if (routedCast) {
+    cards.push(renderRoutedCastBanner(routedCast));
+    cards.push(renderFeedCast(routedCast, state, ui));
+  }
+
+  if (state.feed.status === "loading" && timelineCasts.length === 0 && !routedCast) {
     cards.push(`
       <article class="feed-card empty-card">
         <p class="eyebrow-label">syncing</p>
@@ -1491,7 +1596,7 @@ function renderHomePane(state: AppState, ui: UiState): string {
         <p class="support-copy">Pulling the latest published snapshot into the shell.</p>
       </article>
     `);
-  } else if (state.feed.status === "error" && filteredCasts.length === 0) {
+  } else if (state.feed.status === "error" && timelineCasts.length === 0 && !routedCast) {
     cards.push(`
       <article class="feed-card empty-card">
         <p class="eyebrow-label">feed unavailable</p>
@@ -1499,10 +1604,10 @@ function renderHomePane(state: AppState, ui: UiState): string {
         <p class="support-copy">${escapeHtml(state.feed.error ?? "The feed snapshot request failed.")}</p>
       </article>
     `);
-  } else if (filteredCasts.length === 0) {
+  } else if (timelineCasts.length === 0 && !routedCast) {
     cards.push(renderEmptyTimeline(ui.activeTimeline, state.feed.snapshot));
   } else {
-    cards.push(...filteredCasts.map((cast) => renderFeedCast(cast, state, ui)));
+    cards.push(...timelineCasts.map((cast) => renderFeedCast(cast, state, ui)));
   }
 
   return `
@@ -2141,8 +2246,54 @@ function renderMediaViewerOverlay(ui: UiState): string {
   `;
 }
 
+function renderCastMenuOverlay(state: AppState, ui: UiState): string {
+  const cast = getActiveCast(state, ui);
+
+  if (ui.overlay !== "cast-menu" || !cast) {
+    return "";
+  }
+
+  return `
+    <div class="overlay-backdrop">
+      <section class="overlay-sheet" role="dialog" aria-modal="true" aria-label="Cast menu">
+        <div class="sheet-head">
+          <div>
+            <p class="eyebrow-label">cast menu</p>
+            <h2>${escapeHtml(cast.authorName)}</h2>
+            <p class="support-copy">@${escapeHtml(cast.authorHandle)} · ${escapeHtml(summarizeText(cast.text, 96))}</p>
+          </div>
+          <button class="icon-button" type="button" data-action="close-overlay" aria-label="Close cast menu">
+            ${renderIcon("close")}
+          </button>
+        </div>
+        <div class="cast-menu-list">
+          <button class="cast-menu-item is-danger" type="button" data-action="delete-cast" data-cast-id="${escapeAttribute(cast.id)}">
+            <strong>Delete</strong>
+            <span>Remove this cast from Hypecast.</span>
+          </button>
+          <button class="cast-menu-item" type="button" data-action="copy-cast-link" data-cast-id="${escapeAttribute(cast.id)}">
+            <strong>Copy link</strong>
+            <span>Copy a Hypecast route for this cast.</span>
+          </button>
+          <button class="cast-menu-item" type="button" data-action="mute-author" data-cast-id="${escapeAttribute(cast.id)}">
+            <strong>Mute @${escapeHtml(cast.authorHandle)}</strong>
+            <span>Hide this author’s casts in Hypecast.</span>
+          </button>
+          <button class="cast-menu-item" type="button" data-action="block-author" data-cast-id="${escapeAttribute(cast.id)}">
+            <strong>Block @${escapeHtml(cast.authorHandle)}</strong>
+            <span>Block this author’s casts in Hypecast.</span>
+          </button>
+        </div>
+        <p class="cast-menu-note">These moderation actions are local to Hypecast for now.</p>
+      </section>
+    </div>
+  `;
+}
+
 function renderOverlay(state: AppState, ui: UiState): string {
   switch (ui.overlay) {
+    case "cast-menu":
+      return renderCastMenuOverlay(state, ui);
     case "media":
       return renderMediaViewerOverlay(ui);
     case "search":
@@ -2260,6 +2411,7 @@ export function createApp(root: HTMLDivElement): void {
   let walletSession: WalletSession | null = null;
   let xmtpSession: Awaited<ReturnType<typeof connectXmtp>> | null = null;
   let activeFeedRefreshPromise: Promise<void> | null = null;
+  let activeRouteResolutionId = 0;
 
   const isPullToRefreshEnabled = () => ui.activePane === "home" && ui.overlay === "none";
 
@@ -2309,6 +2461,8 @@ export function createApp(root: HTMLDivElement): void {
       ? root.querySelector<HTMLElement>(".shell-content")
       : null;
     const previousShellScrollTop = previousShellContent?.scrollTop ?? 0;
+    const previousWindowScrollX = options.preserveShellScroll ? window.scrollX : 0;
+    const previousWindowScrollY = options.preserveShellScroll ? window.scrollY : 0;
 
     destroyInlineVideoSources(root);
     root.innerHTML = template(state, ui);
@@ -2317,6 +2471,16 @@ export function createApp(root: HTMLDivElement): void {
 
     if (nextShellContent && options.preserveShellScroll) {
       nextShellContent.scrollTop = previousShellScrollTop;
+      window.scrollTo(previousWindowScrollX, previousWindowScrollY);
+      window.requestAnimationFrame(() => {
+        const refreshedShellContent = root.querySelector<HTMLElement>(".shell-content");
+
+        if (refreshedShellContent) {
+          refreshedShellContent.scrollTop = previousShellScrollTop;
+        }
+
+        window.scrollTo(previousWindowScrollX, previousWindowScrollY);
+      });
     }
 
     root.querySelectorAll<HTMLVideoElement>("video[data-video-src]").forEach((video) => {
@@ -2352,6 +2516,18 @@ export function createApp(root: HTMLDivElement): void {
     saveStoredFeedInteractions(ui.feedInteractions);
   };
 
+  const persistMutedAuthors = () => {
+    saveStoredStringList(STORAGE_KEYS.mutedAuthors, ui.mutedAuthors);
+  };
+
+  const persistBlockedAuthors = () => {
+    saveStoredStringList(STORAGE_KEYS.blockedAuthors, ui.blockedAuthors);
+  };
+
+  const persistDismissedCastIds = () => {
+    saveStoredStringList(STORAGE_KEYS.dismissedCastIds, ui.dismissedCastIds);
+  };
+
   const persistComposerDraft = (draft: string) => {
     ui.composerDraft = draft;
     saveStoredComposerDraft(draft);
@@ -2365,10 +2541,206 @@ export function createApp(root: HTMLDivElement): void {
     ui.replyTargetCastId = undefined;
   };
 
+  const clearRouteFromUrl = () => {
+    activeRouteResolutionId += 1;
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.delete("cast");
+    nextUrl.searchParams.delete("castId");
+    nextUrl.searchParams.delete("hash");
+    nextUrl.searchParams.delete("castHash");
+    nextUrl.searchParams.delete("fid");
+    nextUrl.searchParams.delete("url");
+    nextUrl.hash = "";
+    window.history.replaceState({}, "", nextUrl.toString());
+  };
+
+  const clearRoutedCast = () => {
+    ui.routedCast = undefined;
+  };
+
   const closeOverlay = (options: RenderOptions = {}) => {
     ui.overlay = "none";
     ui.mediaViewer = undefined;
+    ui.activeCastId = undefined;
     render(undefined, options);
+  };
+
+  const openCastMenu = (castId: string) => {
+    ui.activeCastId = castId;
+    ui.overlay = "cast-menu";
+    render(undefined, {
+      preserveShellScroll: true
+    });
+  };
+
+  const updateFeedActionButtonUi = (
+    button: HTMLButtonElement,
+    options: {
+      active: boolean;
+      pressed: boolean;
+      label: string;
+      tone: "recast" | "like";
+      count: number;
+    }
+  ) => {
+    button.classList.toggle("is-active", options.active);
+    button.classList.toggle(`is-${options.tone}`, options.active);
+    button.setAttribute("aria-pressed", String(options.pressed));
+    button.setAttribute("aria-label", options.label);
+
+    const countNode = button.querySelector<HTMLElement>(".feed-action-count");
+
+    if (options.count > 0) {
+      if (countNode) {
+        countNode.textContent = String(options.count);
+      } else {
+        button.insertAdjacentHTML(
+          "beforeend",
+          `<span class="feed-action-count">${escapeHtml(String(options.count))}</span>`
+        );
+      }
+      return;
+    }
+
+    countNode?.remove();
+  };
+
+  const syncFeedInteractionUi = (castId: string) => {
+    const cast = getCastById(state, ui, castId);
+
+    if (!cast) {
+      return;
+    }
+
+    const interaction = feedInteractionState(ui, castId);
+
+    root
+      .querySelectorAll<HTMLButtonElement>(`[data-action="recast-cast"][data-cast-id="${CSS.escape(castId)}"]`)
+      .forEach((button) =>
+        updateFeedActionButtonUi(button, {
+          active: interaction.recasted === true,
+          pressed: interaction.recasted === true,
+          label: `${interaction.recasted ? "Undo recast" : "Recast"} cast by ${cast.authorName}`,
+          tone: "recast",
+          count: recastCountForCast(cast, ui)
+        })
+      );
+
+    root
+      .querySelectorAll<HTMLButtonElement>(`[data-action="like-cast"][data-cast-id="${CSS.escape(castId)}"]`)
+      .forEach((button) =>
+        updateFeedActionButtonUi(button, {
+          active: interaction.liked === true,
+          pressed: interaction.liked === true,
+          label: `${interaction.liked ? "Unlike" : "Like"} cast by ${cast.authorName}`,
+          tone: "like",
+          count: likeCountForCast(cast, ui)
+        })
+      );
+  };
+
+  const upsertAuthorFilter = (targetList: string[], authorHandle: string | undefined): boolean => {
+    const authorKey = authorStorageKey(authorHandle);
+
+    if (!authorKey || targetList.includes(authorKey)) {
+      return false;
+    }
+
+    targetList.push(authorKey);
+    targetList.sort();
+    return true;
+  };
+
+  const copyTextToClipboard = async (value: string): Promise<void> => {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+
+    const textArea = document.createElement("textarea");
+    textArea.value = value;
+    textArea.setAttribute("readonly", "");
+    textArea.style.position = "fixed";
+    textArea.style.opacity = "0";
+    document.body.append(textArea);
+    textArea.select();
+    document.execCommand("copy");
+    textArea.remove();
+  };
+
+  const buildShareableCastLink = (cast: FeedCast) => buildCastRouteUrl(window.location.href, cast);
+
+  const resolveCastRouteFromLocation = async (options: RenderOptions = {}) => {
+    const routeResolutionId = ++activeRouteResolutionId;
+    const route = parseCastRouteFromLocation(window.location);
+
+    if (!route) {
+      if (ui.routedCast) {
+        clearRoutedCast();
+        render(undefined, options);
+      }
+      return;
+    }
+
+    const existingMatch = getAllFeedCasts(state, ui).find((cast) => cast.id === route.castId);
+
+    if (existingMatch) {
+      ui.activePane = "home";
+      ui.activeTimeline = existingMatch.channel;
+      ui.routedCast = existingMatch;
+      render(undefined, options);
+      return;
+    }
+
+    try {
+      const routedCast = await loadCastByIdentifier({
+        identifier: route.castId,
+        type: "hash",
+        viewerFid: state.farcaster.profile?.fid,
+        neynarApiKey: getEffectiveNeynarApiKey()
+      });
+
+      if (routeResolutionId !== activeRouteResolutionId) {
+        return;
+      }
+
+      ui.activePane = "home";
+      ui.activeTimeline = routedCast.channel;
+      ui.routedCast = routedCast;
+      render(undefined, options);
+    } catch {
+      if (routeResolutionId !== activeRouteResolutionId) {
+        return;
+      }
+
+      if (ui.routedCast) {
+        clearRoutedCast();
+        render(undefined, options);
+      }
+    }
+  };
+
+  const removeCastFromShell = (cast: FeedCast) => {
+    if (cast.localOnly) {
+      ui.localCasts = ui.localCasts.filter((entry) => entry.id !== cast.id);
+      saveStoredLocalCasts(ui.localCasts);
+    } else if (!ui.dismissedCastIds.includes(cast.id)) {
+      ui.dismissedCastIds.push(cast.id);
+      persistDismissedCastIds();
+    }
+
+    if (ui.replyTargetCastId === cast.id) {
+      clearReplyTarget();
+    }
+
+    if (ui.routedCast?.id === cast.id) {
+      clearRoutedCast();
+      clearRouteFromUrl();
+    }
+
+    closeOverlay({
+      preserveShellScroll: true
+    });
   };
 
   const openMediaViewer = (target: HTMLElement) => {
@@ -2475,9 +2847,7 @@ export function createApp(root: HTMLDivElement): void {
     }
 
     persistFeedInteractions();
-    render(undefined, {
-      preserveShellScroll: true
-    });
+    syncFeedInteractionUi(castId);
   };
 
   const refreshFeedSnapshot = async () => {
@@ -2512,6 +2882,9 @@ export function createApp(root: HTMLDivElement): void {
             status: "ready",
             snapshot
           }
+        });
+        void resolveCastRouteFromLocation({
+          preserveShellScroll: true
         });
       } catch (error) {
         setPartialState({
@@ -2890,6 +3263,7 @@ export function createApp(root: HTMLDivElement): void {
       ui.activePane = nav;
       ui.overlay = "none";
       ui.mediaViewer = undefined;
+      ui.activeCastId = undefined;
       render();
       return;
     }
@@ -2899,6 +3273,7 @@ export function createApp(root: HTMLDivElement): void {
       ui.activeTimeline = timeline;
       ui.overlay = "none";
       ui.mediaViewer = undefined;
+      ui.activeCastId = undefined;
       render();
       return;
     }
@@ -2910,6 +3285,13 @@ export function createApp(root: HTMLDivElement): void {
     }
 
     switch (action) {
+      case "open-cast-menu":
+        if (!castId) {
+          break;
+        }
+
+        openCastMenu(castId);
+        break;
       case "open-media-viewer":
         openMediaViewer(target);
         break;
@@ -2918,16 +3300,18 @@ export function createApp(root: HTMLDivElement): void {
         break;
       case "close-overlay":
         closeOverlay({
-          preserveShellScroll: ui.overlay === "media"
+          preserveShellScroll: ui.overlay === "media" || ui.overlay === "cast-menu"
         });
         break;
       case "profile":
         ui.mediaViewer = undefined;
+        ui.activeCastId = undefined;
         ui.overlay = ui.overlay === "profile" ? "none" : "profile";
         render();
         break;
       case "search":
         ui.mediaViewer = undefined;
+        ui.activeCastId = undefined;
         ui.overlay = ui.overlay === "search" ? "none" : "search";
         render(
           ui.overlay === "search"
@@ -2942,6 +3326,7 @@ export function createApp(root: HTMLDivElement): void {
       case "compose":
         clearReplyTarget();
         ui.mediaViewer = undefined;
+        ui.activeCastId = undefined;
         ui.overlay = ui.overlay === "composer" ? "none" : "composer";
         render(
           ui.overlay === "composer"
@@ -2955,6 +3340,7 @@ export function createApp(root: HTMLDivElement): void {
         break;
       case "settings":
         ui.mediaViewer = undefined;
+        ui.activeCastId = undefined;
         ui.overlay = ui.overlay === "settings" ? "none" : "settings";
         render();
         break;
@@ -2965,6 +3351,7 @@ export function createApp(root: HTMLDivElement): void {
 
         ui.replyTargetCastId = castId;
         ui.mediaViewer = undefined;
+        ui.activeCastId = undefined;
         ui.overlay = "composer";
         render({
           field: "composer",
@@ -2998,6 +3385,84 @@ export function createApp(root: HTMLDivElement): void {
             void shareCast(cast);
           }
         }
+        break;
+      case "delete-cast":
+        if (!castId) {
+          break;
+        }
+
+        {
+          const cast = getCastById(state, ui, castId);
+
+          if (cast) {
+            removeCastFromShell(cast);
+          }
+        }
+        break;
+      case "copy-cast-link":
+        if (!castId) {
+          break;
+        }
+
+        {
+          const cast = getCastById(state, ui, castId);
+
+          if (cast) {
+            void copyTextToClipboard(buildShareableCastLink(cast));
+          }
+        }
+        closeOverlay({
+          preserveShellScroll: true
+        });
+        break;
+      case "mute-author":
+        if (!castId) {
+          break;
+        }
+
+        {
+          const cast = getCastById(state, ui, castId);
+
+          if (cast && upsertAuthorFilter(ui.mutedAuthors, cast.authorHandle)) {
+            persistMutedAuthors();
+          }
+
+          if (ui.routedCast && cast && authorStorageKey(ui.routedCast.authorHandle) === authorStorageKey(cast.authorHandle)) {
+            clearRoutedCast();
+            clearRouteFromUrl();
+          }
+        }
+        closeOverlay({
+          preserveShellScroll: true
+        });
+        break;
+      case "block-author":
+        if (!castId) {
+          break;
+        }
+
+        {
+          const cast = getCastById(state, ui, castId);
+
+          if (cast && upsertAuthorFilter(ui.blockedAuthors, cast.authorHandle)) {
+            persistBlockedAuthors();
+          }
+
+          if (ui.routedCast && cast && authorStorageKey(ui.routedCast.authorHandle) === authorStorageKey(cast.authorHandle)) {
+            clearRoutedCast();
+            clearRouteFromUrl();
+          }
+        }
+        closeOverlay({
+          preserveShellScroll: true
+        });
+        break;
+      case "clear-route":
+        clearRoutedCast();
+        clearRouteFromUrl();
+        render(undefined, {
+          preserveShellScroll: true
+        });
         break;
       case "clear-reply-target":
         clearReplyTarget();
@@ -3082,7 +3547,7 @@ export function createApp(root: HTMLDivElement): void {
     }
 
     closeOverlay({
-      preserveShellScroll: ui.overlay === "media"
+      preserveShellScroll: ui.overlay === "media" || ui.overlay === "cast-menu"
     });
   });
 
@@ -3103,6 +3568,19 @@ export function createApp(root: HTMLDivElement): void {
     xmtpSession?.client.close();
   });
 
+  window.addEventListener("popstate", () => {
+    void resolveCastRouteFromLocation({
+      preserveShellScroll: true
+    });
+  });
+
+  window.addEventListener("hashchange", () => {
+    void resolveCastRouteFromLocation({
+      preserveShellScroll: true
+    });
+  });
+
   render();
+  void resolveCastRouteFromLocation();
   void refreshFeedSnapshot();
 }

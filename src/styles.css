@@ -969,7 +969,31 @@ code {
 }
 
 .feed-menu {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: rgba(246, 246, 248, 0.34);
+}
+
+.feed-menu:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.route-banner {
+  display: grid;
+  gap: 14px;
+}
+
+.route-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .empty-card h2,
@@ -1205,6 +1229,50 @@ code {
 
 .sheet-head .support-copy {
   margin-top: 10px;
+}
+
+.cast-menu-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.cast-menu-item {
+  width: 100%;
+  padding: 14px 16px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  transition:
+    transform 180ms ease,
+    background 180ms ease,
+    border-color 180ms ease;
+}
+
+.cast-menu-item strong,
+.cast-menu-item span {
+  display: block;
+}
+
+.cast-menu-item span {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.cast-menu-item.is-danger strong {
+  color: #ffbb84;
+}
+
+.cast-menu-item:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.cast-menu-note {
+  margin: 16px 0 0;
+  color: var(--muted);
 }
 
 .search-field {

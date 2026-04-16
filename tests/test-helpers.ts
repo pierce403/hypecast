@@ -99,7 +99,11 @@ export async function triggerPullToRefresh(page: Page): Promise<void> {
   });
 }
 
-export async function mountApp(page: Page, options: HypecastMockOptions = {}): Promise<void> {
+export async function mountApp(
+  page: Page,
+  options: HypecastMockOptions = {},
+  path = "/"
+): Promise<void> {
   await page.addInitScript((input: HypecastMockOptions) => {
     const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
     const svgDataUrl = (label: string) =>
@@ -228,7 +232,7 @@ export async function mountApp(page: Page, options: HypecastMockOptions = {}): P
     }
   });
 
-  await page.goto("/");
+  await page.goto(path);
   await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
   await expect.poll(async () => page.locator(".timeline-tab").count()).toBeGreaterThan(1);
 }

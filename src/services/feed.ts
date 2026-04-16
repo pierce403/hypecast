@@ -282,6 +282,7 @@ function normalizePublicCast(source: FeedSource, cast: UntrustedRecord): FeedCas
   return {
     id: String(cast.hash ?? `${source.id}-${timestamp}`),
     channel: source.id,
+    authorFid: typeof cast.author?.fid === "number" ? cast.author.fid : undefined,
     authorName: cast.author?.displayName ?? source.displayName,
     authorHandle: cast.author?.username ?? source.username,
     authorInitial: firstInitial(cast.author?.displayName, cast.author?.username, source.displayName),
@@ -569,6 +570,7 @@ function normalizeNeynarCast(cast: UntrustedRecord): FeedCast | null {
   return {
     id: String(cast.hash ?? `${author.fid ?? "cast"}-${timestamp}`),
     channel: FOLLOWING_CHANNEL_ID,
+    authorFid: typeof author.fid === "number" ? author.fid : undefined,
     authorName: author.display_name ?? author.username ?? `fid ${author.fid ?? "unknown"}`,
     authorHandle: author.username ?? String(author.fid ?? "unknown"),
     authorInitial: firstInitial(author.display_name, author.username),
@@ -577,7 +579,7 @@ function normalizeNeynarCast(cast: UntrustedRecord): FeedCast | null {
     timestamp,
     contextLabel: typeof channel.name === "string" ? `in ${channel.name}` : undefined,
     text: text || media?.description || media?.title || "Cast",
-    permalink: undefined,
+    permalink: sanitizeLinkUrl(typeof cast.permalink === "string" ? cast.permalink : cast.url),
     replies: typeof cast.replies?.count === "number" ? cast.replies.count : undefined,
     recasts: typeof cast.reactions?.recasts_count === "number" ? cast.reactions.recasts_count : undefined,
     reactions: typeof cast.reactions?.likes_count === "number" ? cast.reactions.likes_count : undefined,
@@ -617,6 +619,41 @@ async function fetchFollowingFeedSnapshot(fid: number, apiKey: string): Promise<
     provider: "neynar",
     viewerFid: fid
   };
+}
+
+async function fetchCastByIdentifier(options: {
+  identifier: string;
+  type: "hash" | "url";
+  apiKey: string;
+  viewerFid?: number;
+}): Promise<FeedCast> {
+  const url = new URL("https://api.neynar.com/v2/farcaster/cast/");
+  url.searchParams.set("identifier", options.identifier);
+  url.searchParams.set("type", options.type);
+
+  if (typeof options.viewerFid === "number") {
+    url.searchParams.set("viewer_fid", String(options.viewerFid));
+  }
+
+  const response = await fetch(url.toString(), {
+    cache: "no-store",
+    headers: {
+      "x-api-key": options.apiKey
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Neynar cast lookup failed with ${response.status}.`);
+  }
+
+  const data = (await response.json()) as UntrustedRecord;
+  const cast = normalizeNeynarCast(data.cast);
+
+  if (!cast) {
+    throw new Error("Neynar cast lookup returned a malformed cast.");
+  }
+
+  return cast;
 }
 
 function isMatchingPersonalizedSnapshot(snapshot: FeedSnapshot, fid: number): boolean {
@@ -735,6 +772,41 @@ export async function loadFeedSnapshot(options: FeedLoadOptions = {}): Promise<F
     const bundledSnapshot = await fetchBundledSnapshot();
     saveCachedSnapshot(bundledSnapshot);
     return bundledSnapshot;
+  }
+}
+
+export async function loadCastByIdentifier(options: {
+  identifier: string;
+  type: "hash" | "url";
+  viewerFid?: number;
+  neynarApiKey?: string;
+}): Promise<FeedCast> {
+  const requestedNeynarApiKey = options.neynarApiKey?.trim();
+  const defaultNeynarApiKey = getDefaultNeynarApiKey();
+  const neynarApiKey = requestedNeynarApiKey || loadStoredNeynarApiKey() || defaultNeynarApiKey;
+
+  if (!neynarApiKey) {
+    throw new Error("A Neynar API key is required to look up a cast.");
+  }
+
+  try {
+    return await fetchCastByIdentifier({
+      identifier: options.identifier,
+      type: options.type,
+      viewerFid: options.viewerFid,
+      apiKey: neynarApiKey
+    });
+  } catch (error) {
+    if (defaultNeynarApiKey && defaultNeynarApiKey !== neynarApiKey) {
+      return fetchCastByIdentifier({
+        identifier: options.identifier,
+        type: options.type,
+        viewerFid: options.viewerFid,
+        apiKey: defaultNeynarApiKey
+      });
+    }
+
+    throw error;
   }
 }
 
