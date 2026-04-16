@@ -16,7 +16,8 @@ import {
   escapeAttribute,
   escapeHtml,
   sanitizeImageUrl,
-  sanitizeLinkUrl
+  sanitizeLinkUrl,
+  sanitizeVideoUrl
 } from "./services/security";
 import { connectWallet, shortAddress, type WalletSession } from "./services/wallet";
 import { connectXmtp } from "./services/xmtp";
@@ -172,20 +173,31 @@ function normalizeStoredMedia(value: unknown): FeedCast["media"] {
   const candidate = value as Partial<NonNullable<FeedCast["media"]>>;
 
   if (
-    (candidate.kind !== "image" && candidate.kind !== "link") ||
+    (candidate.kind !== "image" && candidate.kind !== "video" && candidate.kind !== "link") ||
     typeof candidate.title !== "string" ||
     typeof candidate.description !== "string"
   ) {
     return undefined;
   }
 
+  const safeSrc =
+    typeof candidate.src === "string"
+      ? candidate.kind === "video"
+        ? sanitizeVideoUrl(candidate.src)
+        : sanitizeImageUrl(candidate.src)
+      : undefined;
+
   return {
     kind: candidate.kind,
     title: candidate.title,
     description: candidate.description,
-    src: typeof candidate.src === "string" ? sanitizeImageUrl(candidate.src) : undefined,
+    src: safeSrc,
+    href: typeof candidate.href === "string" ? sanitizeLinkUrl(candidate.href) : undefined,
+    posterSrc:
+      typeof candidate.posterSrc === "string" ? sanitizeImageUrl(candidate.posterSrc) : undefined,
     alt: typeof candidate.alt === "string" ? candidate.alt : undefined,
-    eyebrow: typeof candidate.eyebrow === "string" ? candidate.eyebrow : undefined
+    eyebrow: typeof candidate.eyebrow === "string" ? candidate.eyebrow : undefined,
+    showDetails: typeof candidate.showDetails === "boolean" ? candidate.showDetails : undefined
   };
 }
 
@@ -742,43 +754,203 @@ function renderFeedActions(): string {
   `;
 }
 
+function renderMediaDetails(media: NonNullable<FeedCast["media"]>): string {
+  return `
+    <div class="media-copy">
+      ${media.eyebrow ? `<p class="media-eyebrow">${escapeHtml(media.eyebrow)}</p>` : ""}
+      <strong>${escapeHtml(media.title)}</strong>
+      <p>${escapeHtml(media.description)}</p>
+    </div>
+  `;
+}
+
+function renderMediaActionLink(label: string, href: string): string {
+  return `<a class="media-action-button" href="${escapeAttribute(href)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>`;
+}
+
+function renderMediaDownloadButton(label: string, url: string, fileName: string): string {
+  return `
+    <button
+      class="media-action-button"
+      type="button"
+      data-download-url="${escapeAttribute(url)}"
+      data-download-filename="${escapeAttribute(fileName)}"
+    >
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
+function inferMediaDownloadFileName(url: string, kind: "image" | "video"): string {
+  const fallbackExtension = kind === "video" ? "mp4" : "jpg";
+  const fallbackName = `hypecast-${kind}.${fallbackExtension}`;
+
+  try {
+    const pathname = new URL(url).pathname;
+    const lastSegment = pathname.split("/").filter(Boolean).at(-1);
+
+    if (!lastSegment) {
+      return fallbackName;
+    }
+
+    const decoded = decodeURIComponent(lastSegment).replace(/[^\w.\-]+/g, "-");
+    return decoded || fallbackName;
+  } catch {
+    return fallbackName;
+  }
+}
+
+function triggerBrowserDownload(url: string, fileName: string, openInNewTab = false): void {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+
+  if (openInNewTab) {
+    anchor.target = "_blank";
+    anchor.rel = "noreferrer";
+  }
+
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+async function downloadMediaAsset(url: string, fileName: string): Promise<void> {
+  const safeUrl = sanitizeImageUrl(url) ?? sanitizeVideoUrl(url);
+
+  if (!safeUrl) {
+    return;
+  }
+
+  try {
+    const response = await fetch(safeUrl, {
+      mode: "cors"
+    });
+
+    if (!response.ok) {
+      throw new Error(`Download failed with ${response.status}.`);
+    }
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    triggerBrowserDownload(objectUrl, fileName);
+    window.setTimeout(() => {
+      URL.revokeObjectURL(objectUrl);
+    }, 30_000);
+  } catch {
+    triggerBrowserDownload(safeUrl, fileName, true);
+  }
+}
+
 function renderFeedMedia(media: FeedCast["media"]): string {
   if (!media) {
     return "";
   }
 
+  const safeHref = sanitizeLinkUrl(media.href);
+  const shouldShowDetails = media.showDetails !== false;
   const safeImageSrc = media.kind === "image" ? sanitizeImageUrl(media.src) : undefined;
+  const safeVideoSrc = media.kind === "video" ? sanitizeVideoUrl(media.src) : undefined;
+  const safePosterSrc = media.kind === "video" ? sanitizeImageUrl(media.posterSrc) : undefined;
 
   if (media.kind === "image" && safeImageSrc) {
+    const linkHref = safeHref ?? safeImageSrc;
+    const imageMarkup = `
+      <img
+        src="${escapeAttribute(safeImageSrc)}"
+        alt="${escapeAttribute(media.alt ?? media.title)}"
+        loading="lazy"
+        referrerpolicy="no-referrer"
+      />
+    `;
+
     return `
-      <div class="media-card media-image">
-        <img
-          src="${escapeAttribute(safeImageSrc)}"
-          alt="${escapeAttribute(media.alt ?? media.title)}"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-        />
-        <div class="media-copy">
-          ${media.eyebrow ? `<p class="media-eyebrow">${escapeHtml(media.eyebrow)}</p>` : ""}
-          <strong>${escapeHtml(media.title)}</strong>
-          <p>${escapeHtml(media.description)}</p>
+      <div class="media-card media-image ${shouldShowDetails ? "has-details" : "is-attachment"}">
+        ${
+          linkHref
+            ? `<a class="media-asset-link" href="${escapeAttribute(linkHref)}" target="_blank" rel="noreferrer">${imageMarkup}</a>`
+            : imageMarkup
+        }
+        ${
+          shouldShowDetails
+            ? `
+              ${renderMediaDetails(media)}
+              <div class="media-actions">
+                ${
+                  safeHref && safeHref !== safeImageSrc
+                    ? renderMediaActionLink("Open link", safeHref)
+                    : ""
+                }
+                ${renderMediaDownloadButton(
+                  "Download image",
+                  safeImageSrc,
+                  inferMediaDownloadFileName(safeImageSrc, "image")
+                )}
+              </div>
+            `
+            : `
+              <div class="media-actions">
+                ${renderMediaDownloadButton(
+                  "Download image",
+                  safeImageSrc,
+                  inferMediaDownloadFileName(safeImageSrc, "image")
+                )}
+              </div>
+            `
+        }
+      </div>
+    `;
+  }
+
+  if (media.kind === "video" && safeVideoSrc) {
+    return `
+      <div class="media-card media-video ${shouldShowDetails ? "has-details" : "is-attachment"}">
+        <video
+          controls
+          playsinline
+          preload="metadata"
+          ${safePosterSrc ? `poster="${escapeAttribute(safePosterSrc)}"` : ""}
+        >
+          <source src="${escapeAttribute(safeVideoSrc)}" />
+        </video>
+        ${
+          shouldShowDetails
+            ? renderMediaDetails(media)
+            : ""
+        }
+        <div class="media-actions">
+          ${
+            safeHref
+              ? renderMediaActionLink(
+                  safeHref === safeVideoSrc ? "Open video" : "Open link",
+                  safeHref
+                )
+              : ""
+          }
+          ${renderMediaDownloadButton(
+            "Download video",
+            safeVideoSrc,
+            inferMediaDownloadFileName(safeVideoSrc, "video")
+          )}
         </div>
       </div>
     `;
   }
 
-  if (media.kind === "link" || media.kind === "image") {
-    return `
-      <div class="media-card media-link">
-        <div class="media-hero">
-          <span>${renderIcon("search")}</span>
-        </div>
-        <div class="media-copy">
-          ${media.eyebrow ? `<p class="media-eyebrow">${escapeHtml(media.eyebrow)}</p>` : ""}
-          <strong>${escapeHtml(media.title)}</strong>
-          <p>${escapeHtml(media.description)}</p>
-        </div>
+  if (media.kind === "link" || media.kind === "image" || media.kind === "video") {
+    const cardMarkup = `
+      <div class="media-hero">
+        <span>${renderIcon("search")}</span>
       </div>
+      ${renderMediaDetails(media)}
+    `;
+
+    return `
+      ${
+        safeHref
+          ? `<a class="media-card media-link media-link-card" href="${escapeAttribute(safeHref)}" target="_blank" rel="noreferrer">${cardMarkup}</a>`
+          : `<div class="media-card media-link">${cardMarkup}</div>`
+      }
     `;
   }
 
@@ -1810,7 +1982,9 @@ export function createApp(root: HTMLDivElement): void {
       return;
     }
 
-    const target = event.target.closest<HTMLElement>("[data-action], [data-nav], [data-timeline]");
+    const target = event.target.closest<HTMLElement>(
+      "[data-action], [data-nav], [data-timeline], [data-download-url]"
+    );
 
     if (!target) {
       return;
@@ -1818,6 +1992,7 @@ export function createApp(root: HTMLDivElement): void {
 
     const nav = target.dataset.nav as NavPane | undefined;
     const timeline = target.dataset.timeline as TimelineTab | undefined;
+    const downloadUrl = target.dataset.downloadUrl;
     const action = target.dataset.action;
 
     if (nav) {
@@ -1832,6 +2007,12 @@ export function createApp(root: HTMLDivElement): void {
       ui.activeTimeline = timeline;
       ui.overlay = "none";
       render();
+      return;
+    }
+
+    if (downloadUrl) {
+      const fileName = target.dataset.downloadFilename ?? inferMediaDownloadFileName(downloadUrl, "image");
+      void downloadMediaAsset(downloadUrl, fileName);
       return;
     }
 

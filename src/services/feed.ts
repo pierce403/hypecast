@@ -2,7 +2,8 @@ import { getHypecastTestApi } from "../test-support";
 import {
   normalizePotentialUrl,
   sanitizeImageUrl,
-  sanitizeLinkUrl
+  sanitizeLinkUrl,
+  sanitizeVideoUrl
 } from "./security";
 import type { FeedCast, FeedLoadOptions, FeedSnapshot, FeedSource } from "../types";
 
@@ -139,6 +140,25 @@ function looksLikeImageContentType(contentType: unknown): boolean {
   return typeof contentType === "string" && contentType.toLowerCase().startsWith("image/");
 }
 
+function looksLikeVideoUrl(url: string | undefined): boolean {
+  const normalizedUrl = normalizeUrl(url);
+
+  if (!normalizedUrl) {
+    return false;
+  }
+
+  try {
+    const pathname = new URL(normalizedUrl).pathname;
+    return /\.(m3u8|m4v|mov|mp4|ogg|ogv|webm)$/i.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+function looksLikeVideoContentType(contentType: unknown): boolean {
+  return typeof contentType === "string" && contentType.toLowerCase().startsWith("video/");
+}
+
 function isLikelyPreviewImage(url: string | undefined): boolean {
   const normalizedUrl = normalizeUrl(url);
 
@@ -175,18 +195,48 @@ function isLikelyPreviewImage(url: string | undefined): boolean {
 
 function normalizePublicMedia(cast: UntrustedRecord): FeedCast["media"] {
   const imageEmbed = cast?.embeds?.images?.[0];
+  const videoEmbed = cast?.embeds?.videos?.[0];
   const urlEmbed = cast?.embeds?.urls?.[0]?.openGraph;
+  const videoSrc = sanitizeVideoUrl(
+    videoEmbed?.url ??
+      videoEmbed?.media?.url ??
+      videoEmbed?.media?.streamingUrl ??
+      videoEmbed?.media?.sourceUrl
+  );
+  const videoPoster = sanitizeImageUrl(
+    videoEmbed?.thumbnail?.url ??
+      videoEmbed?.poster?.url ??
+      videoEmbed?.previewImage?.url ??
+      videoEmbed?.media?.thumbnailUrl
+  );
   const imageSrc = sanitizeImageUrl(imageEmbed?.media?.staticRaster ?? imageEmbed?.url);
   const ogImage = sanitizeImageUrl(urlEmbed?.image);
+  const safeUrlEmbedUrl = sanitizeLinkUrl(urlEmbed?.url);
+
+  if (videoSrc) {
+    return {
+      kind: "video",
+      src: videoSrc,
+      href: videoSrc,
+      posterSrc: videoPoster,
+      alt: "Cast video",
+      eyebrow: cast?.channel?.name,
+      title: sanitizeText(cast?.text) || "Cast video",
+      description: sanitizeText(cast?.text),
+      showDetails: false
+    };
+  }
 
   if (imageSrc) {
     return {
       kind: "image",
       src: imageSrc,
+      href: imageSrc,
       alt: imageEmbed.alt ?? imageEmbed.openGraph?.title ?? "Cast image",
       eyebrow: cast?.channel?.name,
       title: cast?.author?.displayName ?? cast?.author?.username ?? "Farcaster",
-      description: sanitizeText(cast?.text)
+      description: sanitizeText(cast?.text),
+      showDetails: false
     };
   }
 
@@ -194,16 +244,19 @@ function normalizePublicMedia(cast: UntrustedRecord): FeedCast["media"] {
     return {
       kind: "image",
       src: ogImage,
+      href: safeUrlEmbedUrl,
       alt: urlEmbed.title ?? "Linked preview",
       eyebrow: urlEmbed.domain ?? cast?.channel?.name,
       title: sanitizeText(urlEmbed.title || urlEmbed.domain || "Linked preview"),
-      description: sanitizeText(urlEmbed.description || urlEmbed.url || cast?.text)
+      description: sanitizeText(urlEmbed.description || urlEmbed.url || cast?.text),
+      showDetails: true
     };
   }
 
   if (urlEmbed) {
     return {
       kind: "link",
+      href: safeUrlEmbedUrl,
       eyebrow: urlEmbed.domain ?? cast?.channel?.name,
       title: sanitizeText(urlEmbed.title || urlEmbed.domain || "Linked preview"),
       description: sanitizeText(urlEmbed.description || urlEmbed.url || cast?.text)
@@ -378,8 +431,12 @@ function normalizeNeynarEmbedMedia(
   const html = metadata.html ?? {};
   const frame = metadata.frame ?? {};
   const directImage = looksLikeImageContentType(metadata.content_type) || Boolean(metadata.image);
+  const directVideo = looksLikeVideoContentType(metadata.content_type) || Boolean(metadata.video);
   const directImageSrc = sanitizeImageUrl(
     typeof metadata.image === "string" ? metadata.image : embedUrl
+  );
+  const directVideoSrc = sanitizeVideoUrl(
+    typeof metadata.video === "string" ? metadata.video : embedUrl
   );
   const frameImage = sanitizeImageUrl(
     typeof frame.image === "string"
@@ -405,6 +462,15 @@ function normalizeNeynarEmbedMedia(
         ? html.oembed.thumbnail_url
         : undefined
   );
+  const ogVideo = sanitizeVideoUrl(
+    typeof html?.ogVideo?.[0]?.url === "string"
+      ? html.ogVideo[0].url
+      : typeof html?.ogVideo?.url === "string"
+        ? html.ogVideo.url
+        : typeof html?.oembed?.video_url === "string"
+          ? html.oembed.video_url
+          : undefined
+  );
   const title = sanitizeText(
     frame.title ||
       html?.fcFrame?.ogTitle ||
@@ -424,6 +490,11 @@ function normalizeNeynarEmbedMedia(
   );
   const eyebrow = safeHostname(embedUrl);
   const fallbackEmbedImage = looksLikeImageUrl(embedUrl) ? sanitizeImageUrl(embedUrl) : undefined;
+  const fallbackEmbedVideo = looksLikeVideoUrl(embedUrl) ? sanitizeVideoUrl(embedUrl) : undefined;
+  const videoPoster = sanitizeImageUrl(
+    typeof metadata.image === "string" ? metadata.image : frameImage ?? ogImage
+  );
+  const videoSrc = directVideo && directVideoSrc ? directVideoSrc : ogVideo ?? fallbackEmbedVideo;
   const imageSrc = directImage && directImageSrc
     ? directImageSrc
     : frameImage && isLikelyPreviewImage(frameImage)
@@ -434,16 +505,35 @@ function normalizeNeynarEmbedMedia(
           ? fallbackEmbedImage
           : undefined;
 
+  if (videoSrc) {
+    return {
+      score: directVideo ? 5 : 4,
+      media: {
+        kind: "video",
+        src: videoSrc,
+        href: embedUrl ?? videoSrc,
+        posterSrc: videoPoster,
+        alt: title,
+        eyebrow,
+        title,
+        description,
+        showDetails: !directVideo
+      }
+    };
+  }
+
   if (imageSrc) {
     return {
       score: directImage ? 4 : 3,
       media: {
         kind: "image",
         src: imageSrc,
+        href: directImage ? embedUrl ?? imageSrc : embedUrl,
         alt: title,
         eyebrow,
         title,
-        description
+        description,
+        showDetails: !directImage
       }
     };
   }
@@ -453,6 +543,7 @@ function normalizeNeynarEmbedMedia(
       score: 2,
       media: {
         kind: "link",
+        href: embedUrl,
         eyebrow,
         title,
         description
@@ -650,6 +741,7 @@ export async function loadFeedSnapshot(options: FeedLoadOptions = {}): Promise<F
 export const __test__ = {
   isLikelyPreviewImage,
   looksLikeImageContentType,
+  looksLikeVideoContentType,
   normalizeNeynarEmbedMedia,
   normalizeNeynarMedia,
   normalizePublicMedia

@@ -54,6 +54,7 @@ export const defaultFeedSnapshot: FeedSnapshot = {
       text: "introducing snaps. a new primitive for richer, interactive feed posts.",
       media: {
         kind: "link",
+        href: "https://snap.host/kitchen-sink",
         eyebrow: "snap.host",
         title: "Snap Kitchen Sink",
         description: "Buttons, charts, toggles, and other interactive feed primitives."
@@ -72,6 +73,7 @@ export const defaultFeedSnapshot: FeedSnapshot = {
       text: "Elon likes the Farcasters.",
       media: {
         kind: "link",
+        href: "https://x.com/elonmusk/status/2034410549438755168",
         eyebrow: "x.com",
         title: "x.com/elonmusk/status/2034410549438755168",
         description: "Linked post discussing Farcaster."
@@ -90,6 +92,7 @@ export const defaultFeedSnapshot: FeedSnapshot = {
       text: "lol",
       media: {
         kind: "link",
+        href: "https://x.com/danywander/status/2044007186079044012",
         eyebrow: "x.com",
         title: "x.com/danywander/status/2044007186079044012",
         description: "Linked post from Dan Romero."
@@ -109,10 +112,55 @@ export const defaultFeedSnapshot: FeedSnapshot = {
       media: {
         kind: "image",
         src: "https://example.com/base-card.png",
+        href: "https://base.org/builder-week",
         alt: "Base preview",
         eyebrow: "base.org",
         title: "Builder Week",
-        description: "A visual preview for the latest Base app launch set."
+        description: "A visual preview for the latest Base app launch set.",
+        showDetails: true
+      }
+    },
+    {
+      id: "cast-dwr-photo",
+      channel: "dwr",
+      authorName: "Dan Romero",
+      authorHandle: "dwr",
+      authorInitial: "D",
+      authorAvatarUrl: "https://example.com/dwr.png",
+      accentClass: "accent-orange",
+      timestamp: 1776202200000,
+      contextLabel: "in photography",
+      text: "Sunlight landed just right over the river tonight.",
+      media: {
+        kind: "image",
+        src: "https://example.com/dwr-photo.jpg",
+        href: "https://example.com/dwr-photo.jpg",
+        alt: "River photo at sunset",
+        title: "River photo at sunset",
+        description: "River photo at sunset",
+        showDetails: false
+      }
+    },
+    {
+      id: "cast-v-video",
+      channel: "v",
+      authorName: "Varun Srinivasan",
+      authorHandle: "v",
+      authorInitial: "V",
+      authorAvatarUrl: "https://example.com/v.png",
+      accentClass: "accent-live",
+      timestamp: 1776231000000,
+      contextLabel: "in demos",
+      text: "Quick demo clip from the latest client build.",
+      media: {
+        kind: "video",
+        src: "https://example.com/client-demo.mp4",
+        href: "https://example.com/client-demo.mp4",
+        posterSrc: "https://example.com/client-demo-poster.jpg",
+        alt: "Client demo video",
+        title: "Client demo video",
+        description: "Client demo video",
+        showDetails: false
       }
     },
     {

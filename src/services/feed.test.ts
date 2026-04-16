@@ -20,7 +20,31 @@ describe("feed media normalization", () => {
     expect(result?.media).toMatchObject({
       kind: "image",
       src: "https://cdn.example.com/media?id=42",
-      title: "https://cdn.example.com/media?id=42"
+      title: "https://cdn.example.com/media?id=42",
+      showDetails: false
+    });
+  });
+
+  it("treats video content types as downloadable video media", () => {
+    const result = __test__.normalizeNeynarEmbedMedia(
+      {
+        url: "https://cdn.example.com/media/video?id=7",
+        metadata: {
+          content_type: "video/mp4",
+          image: "https://cdn.example.com/media/poster.jpg"
+        }
+      },
+      {
+        text: "Video embed"
+      }
+    );
+
+    expect(result?.score).toBe(5);
+    expect(result?.media).toMatchObject({
+      kind: "video",
+      src: "https://cdn.example.com/media/video?id=7",
+      posterSrc: "https://cdn.example.com/media/poster.jpg",
+      showDetails: false
     });
   });
 
@@ -53,8 +77,10 @@ describe("feed media normalization", () => {
     expect(media).toMatchObject({
       kind: "image",
       src: "https://cdn.example.com/story-preview.jpg",
+      href: "https://example.com/story",
       title: "Story preview",
-      description: "A richer preview should win."
+      description: "A richer preview should win.",
+      showDetails: true
     });
   });
 
@@ -77,7 +103,8 @@ describe("feed media normalization", () => {
 
     expect(result?.media).toMatchObject({
       kind: "image",
-      src: "https://cdn.example.com/preview.png"
+      src: "https://cdn.example.com/preview.png",
+      href: "https://example.com/post"
     });
   });
 
@@ -158,7 +185,9 @@ describe("feed media normalization", () => {
       kind: "image",
       src: "https://cdn.example.com/direct-image",
       alt: "Direct image alt",
-      title: "Public Author"
+      href: "https://cdn.example.com/direct-image",
+      title: "Public Author",
+      showDetails: false
     });
   });
 });

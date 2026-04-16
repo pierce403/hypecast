@@ -25,6 +25,8 @@
   - The account sheet still allows a browser-local Neynar override without rebuilding the app
   - Desktop viewports center the interactive shell and add non-interactive context rails without moving core controls outside the shell
   - Search and composer affordances open in-app overlays that reserve the intended interaction pattern
+  - Link preview cards are clickable, while direct image/video attachments expose explicit download controls
+  - Plain image/video attachments can render without redundant title/source captions
 - **Test Criteria**:
   - [x] Logged-in and signed-out states both render inside the same mobile shell
   - [x] Avatar, search, bottom nav, and floating compose button stay visible on mobile
@@ -32,6 +34,7 @@
   - [x] Real Farcaster snapshot data hydrates the feed instead of local scaffold content
   - [x] Signed-in users can load a personalized following feed from their own `fid` without manual key entry
   - [x] Wide desktop viewports keep the shell centered and framed cleanly
+  - [x] Link previews are actionable and image/video cards expose media downloads
 
 ### Client Security Model
 - **Stability**: in-progress

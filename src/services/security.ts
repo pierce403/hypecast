@@ -1,5 +1,5 @@
 const SAFE_LINK_PROTOCOLS = new Set(["http:", "https:", "warpcast:", "farcaster:"]);
-const SAFE_IMAGE_PROTOCOLS = new Set(["http:", "https:"]);
+const SAFE_MEDIA_PROTOCOLS = new Set(["http:", "https:"]);
 
 export function escapeHtml(value: string | number | null | undefined): string {
   return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -65,7 +65,17 @@ export function sanitizeImageUrl(
 
   const parsed = parseAbsoluteUrl(normalized);
 
-  if (!parsed || !SAFE_IMAGE_PROTOCOLS.has(parsed.protocol)) {
+  if (!parsed || !SAFE_MEDIA_PROTOCOLS.has(parsed.protocol)) {
+    return undefined;
+  }
+
+  return parsed.toString();
+}
+
+export function sanitizeVideoUrl(value: string | undefined): string | undefined {
+  const parsed = parseAbsoluteUrl(value);
+
+  if (!parsed || !SAFE_MEDIA_PROTOCOLS.has(parsed.protocol)) {
     return undefined;
   }
 

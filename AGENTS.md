@@ -89,6 +89,7 @@ Notes:
 - Keep the bottom nav outside the `.shell-content` scroll container. The intended behavior is a pinned shell footer while only the feed/pane content scrolls.
 - Keep the Home timeline free of synthetic placeholder cards. Account/status controls belong in panes or overlays; the feed itself should start with real snapshot or local casts.
 - Any untrusted remote URL that reaches `href` or `src` should go through `src/services/security.ts` first. Do not interpolate remote URLs directly into markup.
+- `FeedMedia` now supports `href`, `posterSrc`, and `showDetails`. Use `showDetails: false` for plain image/video attachments so the shell does not print redundant source/title captions.
 
 ## Dependencies That Matter
 
@@ -143,6 +144,7 @@ Notes:
 - Personalized feed loading uses the signed-in Farcaster `fid` plus `hypecast:neynar-api-key` from `localStorage` to request Neynar's following feed directly from the browser. If that request fails, the app falls back to the last matching cached personalized snapshot when available.
 - The working built-in Neynar fallback was verified against the live following-feed endpoint on April 16, 2026. An older key still referenced in `../converge.cv/AGENTS.md` is dead and should not be copied forward.
 - Neynar image embeds often arrive as `metadata.content_type: image/*` plus `metadata.image`, even when the URL has no file extension. The media normalizer must treat those as images and should rank direct image/OG/frame previews above embedded-cast fallbacks.
+- Media downloads are handled client-side in `src/app.ts` with a fetch-to-blob attempt and a new-tab fallback. If you add new downloadable media surfaces, keep them behind sanitized URLs and `data-download-url` buttons.
 - Playwright now runs against both `mobile-chromium` and `desktop-chromium`. If layout changes are viewport-specific, keep assertions for both form factors green.
 
 ## Rapport & Reflection

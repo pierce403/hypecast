@@ -38,12 +38,15 @@ export interface XmtpState {
 }
 
 export interface FeedMedia {
-  kind: "image" | "link";
+  kind: "image" | "video" | "link";
   src?: string;
+  href?: string;
+  posterSrc?: string;
   alt?: string;
   eyebrow?: string;
   title: string;
   description: string;
+  showDetails?: boolean;
 }
 
 export interface FeedSource {

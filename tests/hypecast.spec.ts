@@ -29,6 +29,7 @@ const personalizedFeedSnapshot: FeedSnapshot = {
       text: "A real following-feed cast just landed in Hypecast.",
       media: {
         kind: "link",
+        href: "https://example.com/personalized-preview",
         eyebrow: "example.com",
         title: "Real personalized preview",
         description: "Pulled from the signed-in user's following feed."
@@ -93,16 +94,28 @@ test("renders the mobile shell, filters snapshot tabs, and opens overlays", asyn
   ).toHaveCount(0);
 });
 
-test("renders image and opengraph-style preview cards in the feed", async ({ page }) => {
+test("renders clickable media cards, plain attachments, and download controls", async ({ page }) => {
   const main = shellMain(page);
 
   await mountApp(page);
 
   await expect(main.getByText("Snap Kitchen Sink")).toBeVisible();
+  await expect(main.locator('.media-link-card[href="https://snap.host/kitchen-sink"]')).toBeVisible();
 
   await page.getByRole("tab", { name: "base" }).click();
   await expect(main.locator('.media-image img[alt="Base preview"]')).toBeVisible();
   await expect(main.getByText("Builder Week")).toBeVisible();
+  await expect(main.locator('.media-asset-link[href="https://base.org/builder-week"]')).toBeVisible();
+  await expect(main.getByRole("button", { name: "Download image" })).toBeVisible();
+
+  await page.getByRole("tab", { name: "dwr" }).click();
+  await expect(main.locator('.media-image.is-attachment img[alt="River photo at sunset"]')).toBeVisible();
+  await expect(main.locator(".media-image.is-attachment .media-copy")).toHaveCount(0);
+  await expect(main.getByRole("button", { name: "Download image" })).toBeVisible();
+
+  await page.getByRole("tab", { name: "v" }).click();
+  await expect(main.locator('.media-video video')).toBeVisible();
+  await expect(main.getByRole("button", { name: "Download video" })).toBeVisible();
 });
 
 test("refuses to render unsafe remote feed URLs", async ({ page }) => {

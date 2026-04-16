@@ -5,7 +5,8 @@ import {
   escapeHtml,
   normalizePotentialUrl,
   sanitizeImageUrl,
-  sanitizeLinkUrl
+  sanitizeLinkUrl,
+  sanitizeVideoUrl
 } from "./security";
 
 describe("security helpers", () => {
@@ -61,5 +62,19 @@ describe("security helpers", () => {
   it("rejects non-image data URLs and javascript image URLs", () => {
     expect(sanitizeImageUrl("data:text/html;base64,abcd", { allowDataImage: true })).toBeUndefined();
     expect(sanitizeImageUrl("javascript:alert(1)")).toBeUndefined();
+  });
+
+  it("allows standard https video URLs", () => {
+    expect(sanitizeVideoUrl("https://cdn.example.com/video.mp4")).toBe(
+      "https://cdn.example.com/video.mp4"
+    );
+    expect(sanitizeVideoUrl("//cdn.example.com/video.webm")).toBe(
+      "https://cdn.example.com/video.webm"
+    );
+  });
+
+  it("rejects unsafe video URLs", () => {
+    expect(sanitizeVideoUrl("javascript:alert(1)")).toBeUndefined();
+    expect(sanitizeVideoUrl("data:video/mp4;base64,abcd")).toBeUndefined();
   });
 });
