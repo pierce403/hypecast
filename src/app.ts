@@ -37,7 +37,7 @@ declare const __HYPECAST_BUILD_TIME__: string;
 
 type NavPane = "home" | "apps" | "wallet" | "notifications" | "chat";
 type TimelineTab = string;
-type Overlay = "none" | "profile" | "search" | "composer" | "settings";
+type Overlay = "none" | "profile" | "search" | "composer" | "settings" | "media";
 type IconName =
   | "apps"
   | "bell"
@@ -45,6 +45,7 @@ type IconName =
   | "close"
   | "comment"
   | "compose"
+  | "download"
   | "heart"
   | "home"
   | "more"
@@ -64,10 +65,19 @@ interface SearchResult {
   action?: Overlay;
 }
 
+interface MediaViewerState {
+  kind: "image" | "video";
+  src: string;
+  fileName: string;
+  alt: string;
+  posterSrc?: string;
+}
+
 interface UiState {
   activePane: NavPane;
   activeTimeline: TimelineTab;
   overlay: Overlay;
+  mediaViewer?: MediaViewerState;
   searchQuery: string;
   composerDraft: string;
   localCasts: FeedCast[];
@@ -383,6 +393,11 @@ function renderIcon(name: IconName): string {
       <path d="m4 20 4.2-1 9.4-9.4a2.2 2.2 0 1 0-3.1-3.1L5.1 15.9 4 20Z"></path>
       <path d="M13.5 7.5 16.5 10.5"></path>
     `,
+    download: `
+      <path d="M12 4.5v10"></path>
+      <path d="m8 10.5 4 4 4-4"></path>
+      <path d="M5.5 18.5h13"></path>
+    `,
     heart: `
       <path d="M12 20.2 4.9 13a4.5 4.5 0 0 1 6.36-6.36L12 7.38l.74-.74A4.5 4.5 0 1 1 19.1 13z"></path>
     `,
@@ -463,6 +478,7 @@ function getInitialUiState(): UiState {
     activePane: "home",
     activeTimeline: "following",
     overlay: "none",
+    mediaViewer: undefined,
     searchQuery: "",
     composerDraft: loadStoredComposerDraft(),
     localCasts: loadStoredLocalCasts(),
@@ -1040,6 +1056,35 @@ function renderInlineVideoToggleButton(): string {
   `;
 }
 
+function renderMediaViewerTriggerButton(options: {
+  kind: "image" | "video";
+  src: string;
+  alt: string;
+  fileName: string;
+  posterSrc?: string;
+  content: string;
+  className?: string;
+  ariaLabel?: string;
+}): string {
+  return `
+    <button
+      class="${escapeAttribute(options.className ?? "media-viewer-trigger")}"
+      type="button"
+      data-action="open-media-viewer"
+      data-media-kind="${escapeAttribute(options.kind)}"
+      data-media-src="${escapeAttribute(options.src)}"
+      data-media-alt="${escapeAttribute(options.alt)}"
+      data-media-filename="${escapeAttribute(options.fileName)}"
+      ${options.posterSrc ? `data-media-poster-src="${escapeAttribute(options.posterSrc)}"` : ""}
+      aria-label="${escapeAttribute(
+        options.ariaLabel ?? `Open ${options.kind} fullscreen`
+      )}"
+    >
+      ${options.content}
+    </button>
+  `;
+}
+
 function inferMediaDownloadFileName(url: string, kind: "image" | "video"): string {
   const fallbackExtension = kind === "video" ? "mp4" : "jpg";
   const fallbackName = `hypecast-${kind}.${fallbackExtension}`;
@@ -1148,7 +1193,7 @@ function renderFeedMedia(media: FeedCast["media"]): string {
   const safePosterSrc = media.kind === "video" ? sanitizeImageUrl(media.posterSrc) : undefined;
 
   if (media.kind === "image" && safeImageSrc) {
-    const linkHref = safeHref ?? safeImageSrc;
+    const fileName = inferMediaDownloadFileName(safeImageSrc, "image");
     const imageMarkup = `
       <img
         src="${escapeAttribute(safeImageSrc)}"
@@ -1160,11 +1205,15 @@ function renderFeedMedia(media: FeedCast["media"]): string {
 
     return `
       <div class="media-card media-image ${shouldShowDetails ? "has-details" : "is-attachment"}">
-        ${
-          linkHref
-            ? `<a class="media-asset-link" href="${escapeAttribute(linkHref)}" target="_blank" rel="noreferrer">${imageMarkup}</a>`
-            : imageMarkup
-        }
+        ${renderMediaViewerTriggerButton({
+          kind: "image",
+          src: safeImageSrc,
+          alt: media.alt ?? media.title,
+          fileName,
+          className: "media-asset-button",
+          content: imageMarkup,
+          ariaLabel: "Open image fullscreen"
+        })}
         ${
           shouldShowDetails
             ? `
@@ -1178,7 +1227,7 @@ function renderFeedMedia(media: FeedCast["media"]): string {
                 ${renderMediaDownloadButton(
                   "Download image",
                   safeImageSrc,
-                  inferMediaDownloadFileName(safeImageSrc, "image")
+                  fileName
                 )}
               </div>
             `
@@ -1187,7 +1236,7 @@ function renderFeedMedia(media: FeedCast["media"]): string {
                 ${renderMediaDownloadButton(
                   "Download image",
                   safeImageSrc,
-                  inferMediaDownloadFileName(safeImageSrc, "image")
+                  fileName
                 )}
               </div>
             `
@@ -1197,6 +1246,8 @@ function renderFeedMedia(media: FeedCast["media"]): string {
   }
 
   if (media.kind === "video" && safeVideoSrc) {
+    const fileName = inferMediaDownloadFileName(safeVideoSrc, "video");
+
     return `
       <div class="media-card media-video ${shouldShowDetails ? "has-details" : "is-attachment"}">
         <div class="media-video-player" data-inline-video-player data-video-state="idle">
@@ -1210,6 +1261,16 @@ function renderFeedMedia(media: FeedCast["media"]): string {
             data-video-href="${escapeAttribute(safeHref ?? safeVideoSrc)}"
             ${safePosterSrc ? `poster="${escapeAttribute(safePosterSrc)}"` : ""}
           ></video>
+          ${renderMediaViewerTriggerButton({
+            kind: "video",
+            src: safeVideoSrc,
+            alt: media.alt ?? media.title,
+            posterSrc: safePosterSrc,
+            fileName,
+            className: "media-viewer-trigger media-video-viewer-trigger",
+            ariaLabel: "Open video fullscreen",
+            content: `<span class="sr-only">Open video fullscreen</span>`
+          })}
           ${renderInlineVideoToggleButton()}
         </div>
         ${
@@ -1229,7 +1290,7 @@ function renderFeedMedia(media: FeedCast["media"]): string {
           ${renderMediaDownloadButton(
             "Download video",
             safeVideoSrc,
-            inferMediaDownloadFileName(safeVideoSrc, "video")
+            fileName
           )}
         </div>
       </div>
@@ -2022,8 +2083,68 @@ function renderComposerOverlay(state: AppState, ui: UiState): string {
   `;
 }
 
+function renderMediaViewerOverlay(ui: UiState): string {
+  if (ui.overlay !== "media" || !ui.mediaViewer) {
+    return "";
+  }
+
+  return `
+    <div class="overlay-backdrop is-media-viewer">
+      <section class="media-viewer" role="dialog" aria-modal="true" aria-label="Media viewer">
+        <div class="media-viewer-toolbar">
+          <button
+            class="icon-button media-viewer-icon-button"
+            type="button"
+            data-action="close-overlay"
+            aria-label="Close media viewer"
+          >
+            ${renderIcon("close")}
+          </button>
+          <button
+            class="icon-button media-viewer-icon-button"
+            type="button"
+            data-download-url="${escapeAttribute(ui.mediaViewer.src)}"
+            data-download-filename="${escapeAttribute(ui.mediaViewer.fileName)}"
+            aria-label="Download ${escapeAttribute(ui.mediaViewer.kind)}"
+          >
+            ${renderIcon("download")}
+          </button>
+        </div>
+        <div class="media-viewer-body">
+          ${
+            ui.mediaViewer.kind === "image"
+              ? `
+                <img
+                  class="media-viewer-asset media-viewer-image"
+                  src="${escapeAttribute(ui.mediaViewer.src)}"
+                  alt="${escapeAttribute(ui.mediaViewer.alt)}"
+                  referrerpolicy="no-referrer"
+                />
+              `
+              : `
+                <video
+                  class="media-viewer-asset media-viewer-video"
+                  src="${escapeAttribute(ui.mediaViewer.src)}"
+                  controls
+                  autoplay
+                  playsinline
+                  webkit-playsinline="true"
+                  preload="metadata"
+                  referrerpolicy="no-referrer"
+                  ${ui.mediaViewer.posterSrc ? `poster="${escapeAttribute(ui.mediaViewer.posterSrc)}"` : ""}
+                ></video>
+              `
+          }
+        </div>
+      </section>
+    </div>
+  `;
+}
+
 function renderOverlay(state: AppState, ui: UiState): string {
   switch (ui.overlay) {
+    case "media":
+      return renderMediaViewerOverlay(ui);
     case "search":
       return renderSearchOverlay(state, ui);
     case "profile":
@@ -2242,6 +2363,49 @@ export function createApp(root: HTMLDivElement): void {
 
   const clearReplyTarget = () => {
     ui.replyTargetCastId = undefined;
+  };
+
+  const closeOverlay = (options: RenderOptions = {}) => {
+    ui.overlay = "none";
+    ui.mediaViewer = undefined;
+    render(undefined, options);
+  };
+
+  const openMediaViewer = (target: HTMLElement) => {
+    const mediaKind = target.dataset.mediaKind;
+    const mediaSrc = target.dataset.mediaSrc;
+    const mediaAlt = target.dataset.mediaAlt ?? "Media";
+    const mediaFileName = target.dataset.mediaFilename;
+
+    if (
+      (mediaKind !== "image" && mediaKind !== "video") ||
+      typeof mediaSrc !== "string" ||
+      typeof mediaFileName !== "string"
+    ) {
+      return;
+    }
+
+    const safeSrc =
+      mediaKind === "image" ? sanitizeImageUrl(mediaSrc) : sanitizeVideoUrl(mediaSrc);
+
+    if (!safeSrc) {
+      return;
+    }
+
+    ui.mediaViewer = {
+      kind: mediaKind,
+      src: safeSrc,
+      alt: mediaAlt,
+      fileName: mediaFileName,
+      posterSrc:
+        mediaKind === "video" && typeof target.dataset.mediaPosterSrc === "string"
+          ? sanitizeImageUrl(target.dataset.mediaPosterSrc)
+          : undefined
+    };
+    ui.overlay = "media";
+    render(undefined, {
+      preserveShellScroll: true
+    });
   };
 
   const syncInlineVideoPlayerUi = (
@@ -2725,6 +2889,7 @@ export function createApp(root: HTMLDivElement): void {
     if (nav) {
       ui.activePane = nav;
       ui.overlay = "none";
+      ui.mediaViewer = undefined;
       render();
       return;
     }
@@ -2733,6 +2898,7 @@ export function createApp(root: HTMLDivElement): void {
       ui.activePane = "home";
       ui.activeTimeline = timeline;
       ui.overlay = "none";
+      ui.mediaViewer = undefined;
       render();
       return;
     }
@@ -2744,18 +2910,24 @@ export function createApp(root: HTMLDivElement): void {
     }
 
     switch (action) {
+      case "open-media-viewer":
+        openMediaViewer(target);
+        break;
       case "toggle-inline-video":
         void handleInlineVideoToggle(target);
         break;
       case "close-overlay":
-        ui.overlay = "none";
-        render();
+        closeOverlay({
+          preserveShellScroll: ui.overlay === "media"
+        });
         break;
       case "profile":
+        ui.mediaViewer = undefined;
         ui.overlay = ui.overlay === "profile" ? "none" : "profile";
         render();
         break;
       case "search":
+        ui.mediaViewer = undefined;
         ui.overlay = ui.overlay === "search" ? "none" : "search";
         render(
           ui.overlay === "search"
@@ -2769,6 +2941,7 @@ export function createApp(root: HTMLDivElement): void {
         break;
       case "compose":
         clearReplyTarget();
+        ui.mediaViewer = undefined;
         ui.overlay = ui.overlay === "composer" ? "none" : "composer";
         render(
           ui.overlay === "composer"
@@ -2781,6 +2954,7 @@ export function createApp(root: HTMLDivElement): void {
         );
         break;
       case "settings":
+        ui.mediaViewer = undefined;
         ui.overlay = ui.overlay === "settings" ? "none" : "settings";
         render();
         break;
@@ -2790,6 +2964,7 @@ export function createApp(root: HTMLDivElement): void {
         }
 
         ui.replyTargetCastId = castId;
+        ui.mediaViewer = undefined;
         ui.overlay = "composer";
         render({
           field: "composer",
@@ -2906,8 +3081,9 @@ export function createApp(root: HTMLDivElement): void {
       return;
     }
 
-    ui.overlay = "none";
-    render();
+    closeOverlay({
+      preserveShellScroll: ui.overlay === "media"
+    });
   });
 
   window.addEventListener("beforeinstallprompt", (event) => {

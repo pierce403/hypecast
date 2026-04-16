@@ -131,7 +131,8 @@ test("renders clickable media cards, plain attachments, and download controls", 
   await page.getByRole("tab", { name: "base" }).click();
   await expect(main.locator('.media-image img[alt="Base preview"]')).toBeVisible();
   await expect(main.getByText("Builder Week")).toBeVisible();
-  await expect(main.locator('.media-asset-link[href="https://base.org/builder-week"]')).toBeVisible();
+  await expect(main.getByRole("button", { name: "Open image fullscreen" })).toBeVisible();
+  await expect(main.locator('.media-actions a[href="https://base.org/builder-week"]')).toBeVisible();
   await expect(main.getByRole("button", { name: "Download image" })).toBeVisible();
 
   await page.getByRole("tab", { name: "dwr" }).click();
@@ -143,6 +144,28 @@ test("renders clickable media cards, plain attachments, and download controls", 
   await expect(main.locator('.media-video video')).toBeVisible();
   await expect(main.getByRole("button", { name: "Play video inline" })).toBeVisible();
   await expect(main.getByRole("button", { name: "Download video" })).toBeVisible();
+});
+
+test("opens feed images and videos in the fullscreen media viewer", async ({ page }) => {
+  const main = shellMain(page);
+  const mediaViewer = page.locator(".media-viewer");
+
+  await mountApp(page);
+
+  await page.getByRole("tab", { name: "base" }).click();
+  await main.getByRole("button", { name: "Open image fullscreen" }).click();
+  await expect(mediaViewer).toBeVisible();
+  await expect(mediaViewer.getByRole("button", { name: "Close media viewer" })).toBeVisible();
+  await expect(mediaViewer.getByRole("button", { name: "Download image" })).toBeVisible();
+  await expect(mediaViewer.locator(".media-viewer-image")).toBeVisible();
+  await mediaViewer.getByRole("button", { name: "Close media viewer" }).click();
+  await expect(mediaViewer).toHaveCount(0);
+
+  await page.getByRole("tab", { name: "v" }).click();
+  await main.getByRole("button", { name: "Open video fullscreen" }).click();
+  await expect(mediaViewer).toBeVisible();
+  await expect(mediaViewer.getByRole("button", { name: "Download video" })).toBeVisible();
+  await expect(mediaViewer.locator(".media-viewer-video")).toBeVisible();
 });
 
 test("plays video inline from the feed card", async ({ page }) => {
