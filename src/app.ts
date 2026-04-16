@@ -81,6 +81,10 @@ interface FocusTarget {
   end?: number;
 }
 
+interface RenderOptions {
+  preserveShellScroll?: boolean;
+}
+
 interface PullToRefreshState {
   active: boolean;
   refreshing: boolean;
@@ -2179,10 +2183,21 @@ export function createApp(root: HTMLDivElement): void {
     }
   };
 
-  const render = (focusTarget?: FocusTarget) => {
+  const render = (focusTarget?: FocusTarget, options: RenderOptions = {}) => {
+    const previousShellContent = options.preserveShellScroll
+      ? root.querySelector<HTMLElement>(".shell-content")
+      : null;
+    const previousShellScrollTop = previousShellContent?.scrollTop ?? 0;
+
     destroyInlineVideoSources(root);
     root.innerHTML = template(state, ui);
     syncPullToRefreshUi();
+    const nextShellContent = root.querySelector<HTMLElement>(".shell-content");
+
+    if (nextShellContent && options.preserveShellScroll) {
+      nextShellContent.scrollTop = previousShellScrollTop;
+    }
+
     root.querySelectorAll<HTMLVideoElement>("video[data-video-src]").forEach((video) => {
       syncInlineVideoPlayerUi(video);
       void ensureInlineVideoSource(video);
@@ -2296,7 +2311,9 @@ export function createApp(root: HTMLDivElement): void {
     }
 
     persistFeedInteractions();
-    render();
+    render(undefined, {
+      preserveShellScroll: true
+    });
   };
 
   const refreshFeedSnapshot = async () => {

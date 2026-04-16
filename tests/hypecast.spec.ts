@@ -160,6 +160,7 @@ test("plays video inline from the feed card", async ({ page }) => {
 
 test("reply, recast, and like buttons update cast state", async ({ page }) => {
   const main = shellMain(page);
+  const shellContent = page.locator(".shell-content");
   const replyText = "Shipping a real reply from the Hypecast shell.";
   const likeButton = main.locator('[data-action="like-cast"][data-cast-id="cast-farcaster-snaps"]');
   const recastButton = main.locator('[data-action="recast-cast"][data-cast-id="cast-farcaster-snaps"]');
@@ -172,9 +173,18 @@ test("reply, recast, and like buttons update cast state", async ({ page }) => {
   await expect(recastButton.locator(".feed-action-count")).toHaveText("12");
   await expect(replyButton.locator(".feed-action-count")).toHaveText("4");
 
+  await shellContent.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  const scrollBeforeLike = await shellContent.evaluate((node) => node.scrollTop);
+  expect(scrollBeforeLike).toBeGreaterThan(0);
+
   await likeButton.click();
   await expect(likeButton).toHaveAttribute("aria-pressed", "true");
   await expect(likeButton.locator(".feed-action-count")).toHaveText("30");
+  await expect
+    .poll(async () => shellContent.evaluate((node) => node.scrollTop))
+    .toBeGreaterThan(0);
 
   await recastButton.click();
   await expect(recastButton).toHaveAttribute("aria-pressed", "true");

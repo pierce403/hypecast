@@ -151,6 +151,7 @@ Notes:
 - `hls.js` is lazy-loaded into its own Vite chunk for inline feed playback. That chunk currently triggers Rollup's 500 kB size warning during `npm run build`, but the build still succeeds and the split stays off the main bundle.
 - Media downloads are handled client-side in `src/app.ts` with a fetch-to-blob attempt and a new-tab fallback. If you add new downloadable media surfaces, keep them behind sanitized URLs and `data-download-url` buttons.
 - Pull-to-refresh now lives on `.shell-content` in `src/app.ts` and only arms when Home is at scroll-top with no overlay open. Keep the gesture tied to the feed scroller so the bottom nav stays fixed.
+- The shell rerender path can preserve `.shell-content` scroll for in-place feed mutations. If like/recast or similar controls start jumping the user back to the top, check the `render(..., { preserveShellScroll: true })` call sites in `src/app.ts`.
 - Feed action counts are currently local-shell behavior: replies are derived from persisted local reply casts, and like/recast toggles are stored in `localStorage`. Preserve that relationship unless the product moves to a real write API.
 - Hypecast still does not have a signer-backed Farcaster write path. Composer/reply actions must stay explicitly labeled as local-only until a real network publish flow exists, otherwise users will assume the post should appear in Warpcast.
 - Playwright now runs against both `mobile-chromium` and `desktop-chromium`. If layout changes are viewport-specific, keep assertions for both form factors green.
