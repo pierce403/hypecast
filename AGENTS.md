@@ -81,6 +81,7 @@ Notes:
 - Favor mobile-first UI changes and preserve the installable PWA behavior.
 - Keep CSS intentional and branded. Avoid replacing the current visual direction with generic component-library styling.
 - Keep the signed-in experience inside the phone-shell UI in `src/app.ts` / `src/styles.css`. Wallet, Farcaster, XMTP, and install actions should stay reachable from panes or overlays within that shell instead of reintroducing a separate dashboard.
+- On desktop, keep the interactive phone shell centered and treat any surrounding rails as supporting context only. Do not move primary controls or flows out of the shell.
 - Search, draft composer state, locally published casts, and the persisted Farcaster profile currently live in `src/app.ts` via `localStorage`. If you change those flows, update the storage behavior and the E2E coverage together.
 - Keep the bottom nav outside the `.shell-content` scroll container. The intended behavior is a pinned shell footer while only the feed/pane content scrolls.
 - Keep the Home timeline free of synthetic placeholder cards. Account/status controls belong in panes or overlays; the feed itself should start with real snapshot or local casts.
@@ -133,6 +134,7 @@ Notes:
 - If you learn a new repo-specific command, deployment quirk, or SDK hazard, add it here before finishing the task.
 - Runtime feed loading now attempts live Farcaster SSR profile data via CORS-friendly mirrors (`allorigins`, `r.jina.ai`) before falling back to the committed snapshot; successful responses are cached in `localStorage` under `hypecast:feed-snapshot` for a short TTL.
 - Personalized feed loading uses the signed-in Farcaster `fid` plus `hypecast:neynar-api-key` from `localStorage` to request Neynar's following feed directly from the browser. If that request fails, the app falls back to the last matching cached personalized snapshot when available.
+- Playwright now runs against both `mobile-chromium` and `desktop-chromium`. If layout changes are viewport-specific, keep assertions for both form factors green.
 
 ## Rapport & Reflection
 

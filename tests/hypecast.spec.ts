@@ -42,8 +42,17 @@ async function signInWithFarcaster(page: Page) {
   await page.locator(".overlay-sheet").getByRole("button", { name: "Sign In With Farcaster" }).click();
 }
 
+function shellMain(page: Page) {
+  return page.getByRole("main");
+}
+
+function overlaySheet(page: Page) {
+  return page.locator(".overlay-sheet");
+}
+
 test("renders the mobile shell, filters snapshot tabs, and opens overlays", async ({ page }) => {
   const nav = primaryNav(page);
+  const main = shellMain(page);
 
   await mountApp(page);
 
@@ -63,7 +72,7 @@ test("renders the mobile shell, filters snapshot tabs, and opens overlays", asyn
 
   await page.getByRole("tab", { name: "farcaster" }).click();
   await expect(
-    page.getByText("introducing snaps. a new primitive for richer, interactive feed posts.")
+    main.getByText("introducing snaps. a new primitive for richer, interactive feed posts.")
   ).toBeVisible();
   await expect(page.getByText("Elon likes the Farcasters.")).toHaveCount(0);
 
@@ -84,7 +93,33 @@ test("renders the mobile shell, filters snapshot tabs, and opens overlays", asyn
   ).toHaveCount(0);
 });
 
+test("frames the shell cleanly on desktop", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chromium", "Desktop-only layout assertion.");
+
+  await mountApp(page);
+
+  const viewport = page.viewportSize();
+  const rails = page.locator(".desktop-rail");
+  const shell = page.locator(".phone-shell");
+  const shellBox = await shell.boundingBox();
+  const leftRailBox = await rails.nth(0).boundingBox();
+  const rightRailBox = await rails.nth(1).boundingBox();
+
+  await expect(rails).toHaveCount(2);
+  await expect(page.getByText("desktop stage")).toBeVisible();
+
+  expect(shellBox).toBeTruthy();
+  expect(leftRailBox).toBeTruthy();
+  expect(rightRailBox).toBeTruthy();
+  expect(shellBox?.width ?? 0).toBeLessThan((viewport?.width ?? 0) * 0.4);
+  expect(Math.abs((shellBox?.x ?? 0) + (shellBox?.width ?? 0) / 2 - (viewport?.width ?? 0) / 2)).toBeLessThanOrEqual(24);
+  expect((leftRailBox?.x ?? 0) + (leftRailBox?.width ?? 0)).toBeLessThan(shellBox?.x ?? 0);
+  expect(rightRailBox?.x ?? 0).toBeGreaterThan((shellBox?.x ?? 0) + (shellBox?.width ?? 0));
+});
+
 test("loads a personalized following feed when a Neynar key is configured", async ({ page }) => {
+  const main = shellMain(page);
+
   await mountApp(page, {
     feed: {
       personalizedSnapshot: personalizedFeedSnapshot
@@ -95,12 +130,12 @@ test("loads a personalized following feed when a Neynar key is configured", asyn
   await page.locator('[data-field="neynar-api-key"]').fill("test-neynar-key");
   await page.getByRole("button", { name: "Save key" }).click();
 
-  await expect(page.getByText("Following feed for fid 777 via Neynar.")).toBeVisible();
+  await expect(overlaySheet(page).getByText("Following feed for fid 777 via Neynar.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh following feed" })).toBeEnabled();
 
   await page.getByRole("button", { name: "Close account sheet" }).click();
   await expect(page.getByRole("tab")).toHaveCount(1);
-  await expect(page.getByText("A real following-feed cast just landed in Hypecast.")).toBeVisible();
+  await expect(main.getByText("A real following-feed cast just landed in Hypecast.")).toBeVisible();
 });
 
 test("keeps the bottom nav pinned while the feed scrolls", async ({ page }) => {
@@ -157,6 +192,7 @@ test("boots in standalone mode when the browser reports a PWA launch", async ({ 
 
 test("connects a wallet and surfaces the session in the shell", async ({ page }) => {
   const nav = primaryNav(page);
+  const main = shellMain(page);
   const expectedWalletLabel = `${shortAddress(defaultWalletAddress)} on Base`;
 
   await mountApp(page);
@@ -164,15 +200,17 @@ test("connects a wallet and surfaces the session in the shell", async ({ page })
   await nav.getByRole("button", { name: "Wallet" }).click();
   await page.getByRole("button", { name: "Connect wallet" }).click();
 
-  await expect(page.getByText(expectedWalletLabel)).toBeVisible();
+  await expect(main.getByText(expectedWalletLabel)).toBeVisible();
 
   await nav.getByRole("button", { name: "Notifications" }).click();
-  await expect(page.getByText(expectedWalletLabel)).toBeVisible();
+  await expect(main.getByText(expectedWalletLabel)).toBeVisible();
 });
 
 test("signs in with Farcaster, shows the pending QR state, and binds the profile", async ({
   page
 }) => {
+  const overlay = overlaySheet(page);
+
   await mountApp(page, {
     farcaster: {
       profileDelayMs: 150
@@ -183,10 +221,10 @@ test("signs in with Farcaster, shows the pending QR state, and binds the profile
 
   await expect(page.getByAltText("Farcaster sign-in QR code")).toBeVisible();
   await expect(page.getByRole("link", { name: "Open deep link" })).toBeVisible();
-  await expect(page.getByText("Scan the QR code or open the deep link")).toBeVisible();
+  await expect(overlay.getByText(/Scan the QR code or open the deep link/i)).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "Ada Lovelace" })).toBeVisible();
 
-  await expect(page.locator(".overlay-sheet").getByText("@ada", { exact: true })).toBeVisible();
+  await expect(overlay.getByText("@ada", { exact: true })).toBeVisible();
 });
 
 test("persists the Farcaster profile across reloads", async ({ page }) => {
@@ -203,6 +241,8 @@ test("persists the Farcaster profile across reloads", async ({ page }) => {
 });
 
 test("searches local shell content and opens matching results", async ({ page }) => {
+  const main = shellMain(page);
+
   await mountApp(page);
 
   await signInWithFarcaster(page);
@@ -222,13 +262,14 @@ test("searches local shell content and opens matching results", async ({ page })
   await page.getByRole("button", { name: /cast Farcaster: introducing snaps/i }).click();
   await expect(page.getByRole("tab", { name: "farcaster" })).toHaveAttribute("aria-selected", "true");
   await expect(
-    page.getByText("introducing snaps. a new primitive for richer, interactive feed posts.")
+    main.getByText("introducing snaps. a new primitive for richer, interactive feed posts.")
   ).toBeVisible();
 });
 
 test("preserves composer drafts locally and publishes a local cast after sign-in", async ({
   page
 }) => {
+  const main = shellMain(page);
   const draft = "Shipping the next Hypecast draft straight from the phone shell.";
 
   await mountApp(page);
@@ -251,7 +292,7 @@ test("preserves composer drafts locally and publishes a local cast after sign-in
   await expect(page.getByPlaceholder("What’s happening on Hypecast?")).toHaveValue(draft);
   await page.getByRole("button", { name: "Publish cast" }).click();
 
-  await expect(page.getByText(draft)).toBeVisible();
+  await expect(main.getByText(draft)).toBeVisible();
 
   await page.getByRole("button", { name: "New cast" }).click();
   await expect(page.getByPlaceholder("What’s happening on Hypecast?")).toHaveValue("");
@@ -259,6 +300,7 @@ test("preserves composer drafts locally and publishes a local cast after sign-in
 
 test("requires a wallet before XMTP bootstrap", async ({ page }) => {
   const nav = primaryNav(page);
+  const main = shellMain(page);
 
   await mountApp(page);
 
@@ -266,20 +308,21 @@ test("requires a wallet before XMTP bootstrap", async ({ page }) => {
   await page.getByRole("button", { name: /^XMTP$/ }).click();
 
   await nav.getByRole("button", { name: "Chat" }).click();
-  await expect(page.getByText("Connect a wallet before initializing XMTP.")).toBeVisible();
+  await expect(main.getByText("Connect a wallet before initializing XMTP.")).toBeVisible();
 
   await page.getByRole("button", { name: "Connect wallet first" }).click();
   await expect(page.getByRole("button", { name: "Initialize XMTP" })).toBeEnabled();
 
   await page.getByRole("button", { name: "Initialize XMTP" }).click();
   await expect(page.getByRole("heading", { level: 2, name: "XMTP ready" })).toBeVisible();
-  await expect(page.getByText("inbox-987654321")).toBeVisible();
+  await expect(main.getByText("inbox-987654321")).toBeVisible();
 });
 
 test("renders notification summaries from Farcaster, wallet, and XMTP state", async ({
   page
 }) => {
   const nav = primaryNav(page);
+  const main = shellMain(page);
   const expectedWalletLabel = `${shortAddress(defaultWalletAddress)} on Base`;
 
   await mountApp(page);
@@ -290,14 +333,14 @@ test("renders notification summaries from Farcaster, wallet, and XMTP state", as
 
   await nav.getByRole("button", { name: "Wallet" }).click();
   await page.getByRole("button", { name: "Connect wallet" }).click();
-  await expect(page.getByText(expectedWalletLabel)).toBeVisible();
+  await expect(main.getByText(expectedWalletLabel)).toBeVisible();
 
   await nav.getByRole("button", { name: "Chat" }).click();
   await page.getByRole("button", { name: "Initialize XMTP" }).click();
-  await expect(page.getByText("inbox-987654321")).toBeVisible();
+  await expect(main.getByText("inbox-987654321")).toBeVisible();
 
   await nav.getByRole("button", { name: "Notifications" }).click();
-  await expect(page.getByText("Ada Lovelace is ready on Hypecast.")).toBeVisible();
-  await expect(page.getByText(expectedWalletLabel)).toBeVisible();
-  await expect(page.getByText("XMTP inbox inbox-98765")).toBeVisible();
+  await expect(main.getByText("Ada Lovelace is ready on Hypecast.")).toBeVisible();
+  await expect(main.getByText(expectedWalletLabel)).toBeVisible();
+  await expect(main.getByText("XMTP inbox inbox-98765")).toBeVisible();
 });

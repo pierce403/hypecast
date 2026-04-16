@@ -14,14 +14,15 @@
   - [x] Browsers that expose `beforeinstallprompt` can surface an install action in the UI
   - [x] Standalone launches are detected and reflected in app state
 
-### Logged-In Mobile Feed Shell
+### Responsive Feed Shell
 - **Stability**: stable
-- **Description**: The signed-in app surface mirrors a Farcaster-like mobile layout with avatar, top search affordance, fixed bottom navigation, floating composer placement, and a real public-or-personalized feed.
+- **Description**: The signed-in app surface mirrors a Farcaster-like mobile layout on phones and uses a centered handset plus supportive desktop rails on larger screens, while keeping the same real public-or-personalized feed.
 - **Properties**:
   - Home view renders a phone-first feed shell instead of a launchpad dashboard
   - Bottom navigation exposes home, apps, wallet, notifications, and chat surfaces and remains pinned while the feed scrolls
   - Home falls back to `/farcaster-feed.json`, a same-origin snapshot generated from public Farcaster profile pages
   - Signed-in users can switch Home to a real following feed by saving a Neynar API key in the account sheet
+  - Desktop viewports center the interactive shell and add non-interactive context rails without moving core controls outside the shell
   - Search and composer affordances open in-app overlays that reserve the intended interaction pattern
 - **Test Criteria**:
   - [x] Logged-in and signed-out states both render inside the same mobile shell
@@ -29,6 +30,7 @@
   - [x] The bottom navigation stays pinned while the feed content scrolls
   - [x] Real Farcaster snapshot data hydrates the feed instead of local scaffold content
   - [x] Signed-in users can load a personalized following feed from their own `fid`
+  - [x] Wide desktop viewports keep the shell centered and framed cleanly
 
 ### Farcaster Sign-In And Profile Binding
 - **Stability**: in-progress

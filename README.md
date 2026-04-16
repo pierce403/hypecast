@@ -6,6 +6,7 @@ Hypecast is a PWA-first Farcaster client scaffold built with vanilla TypeScript,
 - Injected-wallet connection for EVM wallets
 - Sign In With Farcaster via the official Farcaster auth client
 - A real personalized following feed path keyed off the signed-in user's `fid`
+- A responsive shell that stays mobile-native on phones and framed/centered on desktop
 - An XMTP integration seam ready for a live browser client bootstrap
 
 ## Run it

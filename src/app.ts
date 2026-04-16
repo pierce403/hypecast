@@ -629,6 +629,104 @@ function renderStatusCapsules(state: AppState): string {
   `;
 }
 
+function activeTimelineLabel(ui: UiState, snapshot?: FeedSnapshot): string {
+  if (ui.activeTimeline === feedAggregateTab.id) {
+    return feedAggregateTab.label;
+  }
+
+  return getFeedSource(snapshot, ui.activeTimeline)?.label ?? ui.activeTimeline;
+}
+
+function renderDesktopStatusRow(label: string, detail: string, tone: string): string {
+  return `
+    <div class="desktop-status-row">
+      <span class="notice-dot ${tone}" aria-hidden="true"></span>
+      <div>
+        <strong>${escapeHtml(label)}</strong>
+        <p>${escapeHtml(detail)}</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderDesktopStartRail(state: AppState, ui: UiState): string {
+  const tabs = getTimelineTabs(state.feed.snapshot).slice(0, 5);
+  const feedMode = state.feed.snapshot?.mode === "following" ? "Personal following" : "Public fallback";
+
+  return `
+    <aside class="desktop-rail desktop-rail-start">
+      <article class="desktop-panel desktop-hero-panel">
+        <p class="eyebrow-label">desktop stage</p>
+        <h2>Hypecast keeps the phone shell centered and readable on larger screens.</h2>
+        <p class="support-copy">
+          The mobile interaction model stays intact in the center while the surrounding rails summarize the live session, feed mode, and current focus.
+        </p>
+      </article>
+
+      <article class="desktop-panel">
+        <p class="eyebrow-label">live summary</p>
+        <div class="desktop-stat-grid">
+          <div class="desktop-stat">
+            <span>Feed</span>
+            <strong>${escapeHtml(feedMode)}</strong>
+          </div>
+          <div class="desktop-stat">
+            <span>Pane</span>
+            <strong>${escapeHtml(paneTitle(ui.activePane))}</strong>
+          </div>
+          <div class="desktop-stat">
+            <span>Timeline</span>
+            <strong>${escapeHtml(activeTimelineLabel(ui, state.feed.snapshot))}</strong>
+          </div>
+          <div class="desktop-stat">
+            <span>Casts loaded</span>
+            <strong>${escapeHtml(String(getAllFeedCasts(state, ui).length))}</strong>
+          </div>
+        </div>
+        <div class="desktop-chip-row" aria-hidden="true">
+          ${tabs
+            .map((tab) => `<span class="desktop-chip">${escapeHtml(tab.label)}</span>`)
+            .join("")}
+        </div>
+      </article>
+    </aside>
+  `;
+}
+
+function renderDesktopEndRail(state: AppState, ui: UiState): string {
+  const featuredCast = getAllFeedCasts(state, ui)[0];
+
+  return `
+    <aside class="desktop-rail desktop-rail-end">
+      <article class="desktop-panel">
+        <p class="eyebrow-label">session pulse</p>
+        <div class="desktop-status-list">
+          ${renderDesktopStatusRow("Farcaster", describeFarcaster(state.farcaster), stateTone(state.farcaster.status))}
+          ${renderDesktopStatusRow(
+            "Feed",
+            describeFeed(state.feed),
+            state.feed.snapshot?.mode === "following" ? "is-live" : stateTone(state.feed.status)
+          )}
+          ${renderDesktopStatusRow("Wallet", describeWallet(state.wallet), stateTone(state.wallet.status))}
+          ${renderDesktopStatusRow("XMTP", describeXmtp(state.xmtp), stateTone(state.xmtp.status))}
+        </div>
+      </article>
+
+      ${
+        featuredCast
+          ? `
+            <article class="desktop-panel desktop-cast-panel">
+              <p class="eyebrow-label">top cast</p>
+              <strong>${escapeHtml(featuredCast.authorName)} <span>@${escapeHtml(featuredCast.authorHandle)}</span></strong>
+              <p>${escapeHtml(summarizeText(featuredCast.text, 180))}</p>
+            </article>
+          `
+          : ""
+      }
+    </aside>
+  `;
+}
+
 function renderFeedActions(): string {
   return `
     <div class="feed-actions" aria-hidden="true">
@@ -1347,72 +1445,76 @@ function template(
     <div class="app-shell">
       <div class="ambient ambient-left"></div>
       <div class="ambient ambient-right"></div>
-      <section class="phone-shell">
-        <header class="topbar">
-          <button class="avatar-button" type="button" data-action="profile" aria-label="Open account">
-            ${renderAvatar(state.farcaster.profile, "top-avatar", "top-avatar top-avatar-fallback")}
-          </button>
-          <h1>${escapeHtml(paneTitle(ui.activePane))}</h1>
-          <button class="icon-button" type="button" data-action="search" aria-label="Open search">
-            ${renderIcon("search")}
-          </button>
-        </header>
+      <div class="desktop-stage">
+        ${renderDesktopStartRail(state, ui)}
+        <section class="phone-shell">
+          <header class="topbar">
+            <button class="avatar-button" type="button" data-action="profile" aria-label="Open account">
+              ${renderAvatar(state.farcaster.profile, "top-avatar", "top-avatar top-avatar-fallback")}
+            </button>
+            <h1>${escapeHtml(paneTitle(ui.activePane))}</h1>
+            <button class="icon-button" type="button" data-action="search" aria-label="Open search">
+              ${renderIcon("search")}
+            </button>
+          </header>
 
-        ${
-          ui.activePane === "home"
-            ? `
-              <div class="timeline-tabs" role="tablist" aria-label="Timeline tabs">
-                ${timelineTabs
-                  .map(
-                    (tab) => `
-                      <button
-                        class="timeline-tab ${ui.activeTimeline === tab.id ? "is-active" : ""}"
-                        type="button"
-                        data-timeline="${tab.id}"
-                        role="tab"
-                        aria-selected="${ui.activeTimeline === tab.id}"
-                      >
-                        ${escapeHtml(tab.label)}
-                      </button>
-                    `
-                  )
-                  .join("")}
-              </div>
-            `
-            : ""
-        }
-
-        <main class="shell-content">
-          ${renderPane(state, ui)}
-        </main>
-
-        <button class="compose-fab" type="button" data-action="compose" aria-label="New cast">
-          ${renderIcon("compose")}
-        </button>
-
-        <nav class="bottom-nav" aria-label="Primary">
-          ${navItems
-            .map(
-              (item) => `
-                <button
-                  class="nav-button ${ui.activePane === item.id ? "is-active" : ""}"
-                  type="button"
-                  data-nav="${item.id}"
-                  aria-label="${escapeAttribute(item.label)}"
-                >
-                  <span class="nav-icon-wrap">
-                    ${renderIcon(item.icon)}
-                    ${unreadBadge(state, item.id)}
-                  </span>
-                  <span class="sr-only">${escapeHtml(item.label)}</span>
-                </button>
+          ${
+            ui.activePane === "home"
+              ? `
+                <div class="timeline-tabs" role="tablist" aria-label="Timeline tabs">
+                  ${timelineTabs
+                    .map(
+                      (tab) => `
+                        <button
+                          class="timeline-tab ${ui.activeTimeline === tab.id ? "is-active" : ""}"
+                          type="button"
+                          data-timeline="${tab.id}"
+                          role="tab"
+                          aria-selected="${ui.activeTimeline === tab.id}"
+                        >
+                          ${escapeHtml(tab.label)}
+                        </button>
+                      `
+                    )
+                    .join("")}
+                </div>
               `
-            )
-            .join("")}
-        </nav>
+              : ""
+          }
 
-        ${renderOverlay(state, ui)}
-      </section>
+          <main class="shell-content">
+            ${renderPane(state, ui)}
+          </main>
+
+          <button class="compose-fab" type="button" data-action="compose" aria-label="New cast">
+            ${renderIcon("compose")}
+          </button>
+
+          <nav class="bottom-nav" aria-label="Primary">
+            ${navItems
+              .map(
+                (item) => `
+                  <button
+                    class="nav-button ${ui.activePane === item.id ? "is-active" : ""}"
+                    type="button"
+                    data-nav="${item.id}"
+                    aria-label="${escapeAttribute(item.label)}"
+                  >
+                    <span class="nav-icon-wrap">
+                      ${renderIcon(item.icon)}
+                      ${unreadBadge(state, item.id)}
+                    </span>
+                    <span class="sr-only">${escapeHtml(item.label)}</span>
+                  </button>
+                `
+              )
+              .join("")}
+          </nav>
+
+          ${renderOverlay(state, ui)}
+        </section>
+        ${renderDesktopEndRail(state, ui)}
+      </div>
     </div>
   `;
 }
