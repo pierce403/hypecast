@@ -5,6 +5,7 @@ const FEED_SNAPSHOT_URL = `${import.meta.env.BASE_URL}farcaster-feed.json`;
 const FEED_CACHE_KEY = "hypecast:feed-snapshot";
 const FEED_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const NEYNAR_API_KEY_STORAGE_KEY = "hypecast:neynar-api-key";
+const FALLBACK_NEYNAR_API_KEY = "F523CE9D-47C9-494D-954F-2C628D170E4A";
 const PERSONALIZED_FEED_LIMIT = 20;
 const FOLLOWING_CHANNEL_ID = "following";
 const REALTIME_CASTS_PER_SOURCE = 3;
@@ -17,6 +18,11 @@ const REALTIME_SOURCES: Array<{ id: string; label: string; username: string; acc
 ];
 
 type UntrustedRecord = Record<string, any>;
+
+function resolveDefaultNeynarApiKey(): string {
+  const envKey = import.meta.env.VITE_NEYNAR_API_KEY?.trim();
+  return envKey || FALLBACK_NEYNAR_API_KEY;
+}
 
 function isFeedSnapshot(value: unknown): value is FeedSnapshot {
   if (!value || typeof value !== "object") {
@@ -418,6 +424,14 @@ export function loadStoredNeynarApiKey(): string {
   }
 }
 
+export function getDefaultNeynarApiKey(): string {
+  return resolveDefaultNeynarApiKey();
+}
+
+export function getEffectiveNeynarApiKey(): string {
+  return loadStoredNeynarApiKey() || getDefaultNeynarApiKey();
+}
+
 export function saveStoredNeynarApiKey(value: string): void {
   const nextValue = value.trim();
 
@@ -445,6 +459,10 @@ export function hasStoredNeynarApiKey(): boolean {
   return loadStoredNeynarApiKey().length > 0;
 }
 
+export function hasEffectiveNeynarApiKey(): boolean {
+  return getEffectiveNeynarApiKey().length > 0;
+}
+
 export async function loadFeedSnapshot(options: FeedLoadOptions = {}): Promise<FeedSnapshot> {
   const testApi = getHypecastTestApi();
 
@@ -453,7 +471,9 @@ export async function loadFeedSnapshot(options: FeedLoadOptions = {}): Promise<F
   }
 
   const cachedSnapshot = loadCachedSnapshot();
-  const neynarApiKey = options.neynarApiKey?.trim();
+  const requestedNeynarApiKey = options.neynarApiKey?.trim();
+  const defaultNeynarApiKey = getDefaultNeynarApiKey();
+  const neynarApiKey = requestedNeynarApiKey || loadStoredNeynarApiKey() || defaultNeynarApiKey;
   const fid = options.fid;
 
   if (typeof fid === "number" && neynarApiKey) {
@@ -470,6 +490,16 @@ export async function loadFeedSnapshot(options: FeedLoadOptions = {}): Promise<F
       saveCachedSnapshot(followingSnapshot);
       return followingSnapshot;
     } catch (error) {
+      if (defaultNeynarApiKey && defaultNeynarApiKey !== neynarApiKey) {
+        try {
+          const fallbackSnapshot = await fetchFollowingFeedSnapshot(fid, defaultNeynarApiKey);
+          saveCachedSnapshot(fallbackSnapshot);
+          return fallbackSnapshot;
+        } catch {
+          // Fall through to the cached-snapshot and error paths below.
+        }
+      }
+
       if (cachedSnapshot && isMatchingPersonalizedSnapshot(cachedSnapshot, fid)) {
         return cachedSnapshot;
       }

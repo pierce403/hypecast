@@ -21,7 +21,8 @@
   - Home view renders a phone-first feed shell instead of a launchpad dashboard
   - Bottom navigation exposes home, apps, wallet, notifications, and chat surfaces and remains pinned while the feed scrolls
   - Home falls back to `/farcaster-feed.json`, a same-origin snapshot generated from public Farcaster profile pages
-  - Signed-in users can switch Home to a real following feed by saving a Neynar API key in the account sheet
+  - Signed-in users can switch Home to a real following feed automatically through the app's built-in Neynar key
+  - The account sheet still allows a browser-local Neynar override without rebuilding the app
   - Desktop viewports center the interactive shell and add non-interactive context rails without moving core controls outside the shell
   - Search and composer affordances open in-app overlays that reserve the intended interaction pattern
 - **Test Criteria**:
@@ -29,7 +30,7 @@
   - [x] Avatar, search, bottom nav, and floating compose button stay visible on mobile
   - [x] The bottom navigation stays pinned while the feed content scrolls
   - [x] Real Farcaster snapshot data hydrates the feed instead of local scaffold content
-  - [x] Signed-in users can load a personalized following feed from their own `fid`
+  - [x] Signed-in users can load a personalized following feed from their own `fid` without manual key entry
   - [x] Wide desktop viewports keep the shell centered and framed cleanly
 
 ### Farcaster Sign-In And Profile Binding

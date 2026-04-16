@@ -106,7 +106,8 @@ Notes:
 - The browser app cannot fetch `https://ssr.farcaster.xyz/*` directly because of cross-origin restrictions. If the home feed needs fresher real data, update the committed snapshot with `npm run sync:feed` instead of wiring runtime fetches to SSR pages.
 - If the bottom nav drifts below the fold again, inspect `html`, `body`, `#app`, `.app-shell`, and `.phone-shell` first. The shell depends on viewport-locked `100dvh` sizing plus `body { overflow: hidden; }`.
 - Keep `.bottom-nav` sticky with `bottom: 0` and `margin-top: auto` so it stays anchored to the phone shell edge while only `.shell-content` scrolls.
-- The personalized following feed currently uses Neynar from the browser with a user-supplied API key stored in `localStorage`. That is the practical Pages-compatible path today, but it is not the long-term secret-management model.
+- The personalized following feed currently uses Neynar from the browser with a built-in default client key, and optional browser-local overrides stored in `localStorage`. That is the practical Pages-compatible path today, but it is not the long-term secret-management model.
+- Hypecast now ships with the verified Converge Neynar client key as the built-in default. The account-sheet field is a browser-local override, not a required setup step.
 
 ## Deployment Notes
 
@@ -134,6 +135,7 @@ Notes:
 - If you learn a new repo-specific command, deployment quirk, or SDK hazard, add it here before finishing the task.
 - Runtime feed loading now attempts live Farcaster SSR profile data via CORS-friendly mirrors (`allorigins`, `r.jina.ai`) before falling back to the committed snapshot; successful responses are cached in `localStorage` under `hypecast:feed-snapshot` for a short TTL.
 - Personalized feed loading uses the signed-in Farcaster `fid` plus `hypecast:neynar-api-key` from `localStorage` to request Neynar's following feed directly from the browser. If that request fails, the app falls back to the last matching cached personalized snapshot when available.
+- The working built-in Neynar fallback was verified against the live following-feed endpoint on April 16, 2026. An older key still referenced in `../converge.cv/AGENTS.md` is dead and should not be copied forward.
 - Playwright now runs against both `mobile-chromium` and `desktop-chromium`. If layout changes are viewport-specific, keep assertions for both form factors green.
 
 ## Rapport & Reflection

@@ -117,7 +117,7 @@ test("frames the shell cleanly on desktop", async ({ page }, testInfo) => {
   expect(rightRailBox?.x ?? 0).toBeGreaterThan((shellBox?.x ?? 0) + (shellBox?.width ?? 0));
 });
 
-test("loads a personalized following feed when a Neynar key is configured", async ({ page }) => {
+test("loads a personalized following feed automatically after Farcaster sign-in", async ({ page }) => {
   const main = shellMain(page);
 
   await mountApp(page, {
@@ -127,11 +127,11 @@ test("loads a personalized following feed when a Neynar key is configured", asyn
   });
 
   await signInWithFarcaster(page);
-  await page.locator('[data-field="neynar-api-key"]').fill("test-neynar-key");
-  await page.getByRole("button", { name: "Save key" }).click();
 
   await expect(overlaySheet(page).getByText("Following feed for fid 777 via Neynar.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh following feed" })).toBeEnabled();
+  await expect(page.locator('[data-field="neynar-api-key"]')).toHaveValue("");
+  await expect(overlaySheet(page).getByText("App default active")).toBeVisible();
 
   await page.getByRole("button", { name: "Close account sheet" }).click();
   await expect(page.getByRole("tab")).toHaveCount(1);

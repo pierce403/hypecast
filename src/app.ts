@@ -6,6 +6,8 @@ import {
 } from "./services/farcaster";
 import {
   clearStoredNeynarApiKey,
+  getDefaultNeynarApiKey,
+  getEffectiveNeynarApiKey,
   loadFeedSnapshot,
   loadStoredNeynarApiKey,
   saveStoredNeynarApiKey
@@ -1270,13 +1272,28 @@ function renderFarcasterRelayCard(state: AppState): string {
 
 function renderProfileOverlay(state: AppState): string {
   const profile = state.farcaster.profile;
-  const neynarApiKey = loadStoredNeynarApiKey();
-  const personalizedFeedReady = Boolean(profile?.fid && neynarApiKey);
-  const feedHelperText = personalizedFeedReady
-    ? "Saved in this browser. Refresh the feed to load your real following timeline."
-    : neynarApiKey
-      ? "Key saved. Sign in with Farcaster to load your following feed."
-      : "Paste a Neynar API key to load your real following feed in this browser.";
+  const storedNeynarApiKey = loadStoredNeynarApiKey();
+  const defaultNeynarApiKey = getDefaultNeynarApiKey();
+  const effectiveNeynarApiKey = getEffectiveNeynarApiKey();
+  const usingStoredNeynarApiKey = Boolean(storedNeynarApiKey);
+  const usingDefaultNeynarApiKey = !usingStoredNeynarApiKey && Boolean(defaultNeynarApiKey);
+  const personalizedFeedReady = Boolean(profile?.fid && effectiveNeynarApiKey);
+  const feedKeySourceLabel = usingStoredNeynarApiKey
+    ? "Local override active"
+    : usingDefaultNeynarApiKey
+      ? "App default active"
+      : "No key configured";
+  const feedHelperText = profile?.fid
+    ? usingStoredNeynarApiKey
+      ? "A saved override is active in this browser. Refresh the feed to load your following timeline."
+      : usingDefaultNeynarApiKey
+        ? "The app's built-in Neynar key is active. Refresh the feed to load your following timeline, or save a local override below."
+        : "Save a Neynar API key to load your following feed in this browser."
+    : usingStoredNeynarApiKey
+      ? "Saved override is ready. Sign in with Farcaster to load your following feed."
+      : usingDefaultNeynarApiKey
+        ? "The app's built-in Neynar key is ready. Sign in with Farcaster to load your following feed."
+        : "Paste a Neynar API key to load your real following feed in this browser.";
 
   return `
     <div class="overlay-backdrop">
@@ -1324,14 +1341,15 @@ function renderProfileOverlay(state: AppState): string {
         <div class="feed-config-card">
           <p class="eyebrow-label">following feed</p>
           <h3>Load your real Farcaster feed</h3>
+          <p class="eyebrow-label">${escapeHtml(feedKeySourceLabel)}</p>
           <p class="support-copy">${escapeHtml(feedHelperText)}</p>
           <label class="secret-field">
             <span class="sr-only">Neynar API key</span>
             <input
               type="password"
               data-field="neynar-api-key"
-              value="${escapeAttribute(neynarApiKey)}"
-              placeholder="Paste Neynar API key"
+              value="${escapeAttribute(storedNeynarApiKey)}"
+              placeholder="Optional local Neynar override"
               autocomplete="off"
               autocapitalize="off"
               spellcheck="false"
@@ -1339,9 +1357,9 @@ function renderProfileOverlay(state: AppState): string {
           </label>
           <div class="action-grid">
             <button class="secondary-button" type="button" data-action="save-feed-key">
-              ${neynarApiKey ? "Update key" : "Save key"}
+              ${usingStoredNeynarApiKey ? "Update override" : "Save override"}
             </button>
-            <button class="secondary-button" type="button" data-action="clear-feed-key" ${neynarApiKey ? "" : "disabled"}>
+            <button class="secondary-button" type="button" data-action="clear-feed-key" ${usingStoredNeynarApiKey ? "" : "disabled"}>
               Clear key
             </button>
             <button class="primary-button" type="button" data-action="refresh-feed" ${personalizedFeedReady ? "" : "disabled"}>
@@ -1562,7 +1580,7 @@ export function createApp(root: HTMLDivElement): void {
   };
 
   const refreshFeedSnapshot = async () => {
-    const neynarApiKey = loadStoredNeynarApiKey();
+    const neynarApiKey = getEffectiveNeynarApiKey();
     const fid = state.farcaster.profile?.fid;
 
     setPartialState({
