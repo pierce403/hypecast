@@ -13,6 +13,21 @@ import {
   loadStoredNeynarApiKey,
   saveStoredNeynarApiKey
 } from "./services/feed";
+import {
+  clearStoredFarcasterWriteSession,
+  clearStoredNeynarClientId,
+  connectFarcasterWriteAccess,
+  getDefaultNeynarClientId,
+  getEffectiveNeynarClientId,
+  hasMatchingFarcasterWriteSession,
+  isNeynarPermissionError,
+  loadStoredFarcasterWriteSession,
+  loadStoredNeynarClientId,
+  publishCast,
+  publishReaction,
+  saveStoredFarcasterWriteSession,
+  saveStoredNeynarClientId
+} from "./services/neynar";
 import { buildCastRouteUrl, parseCastRouteFromLocation } from "./services/routes";
 import {
   escapeAttribute,
@@ -29,6 +44,7 @@ import type {
   AppState,
   BeforeInstallPromptEvent,
   FarcasterProfile,
+  FarcasterWriteSession,
   FeedCast,
   FeedSnapshot,
   XmtpState
@@ -39,7 +55,15 @@ declare const __HYPECAST_BUILD_TIME__: string;
 
 type NavPane = "home" | "apps" | "wallet" | "notifications" | "chat";
 type TimelineTab = string;
-type Overlay = "none" | "profile" | "search" | "composer" | "settings" | "media" | "cast-menu";
+type Overlay =
+  | "none"
+  | "profile"
+  | "search"
+  | "composer"
+  | "settings"
+  | "media"
+  | "cast-menu"
+  | "write-access";
 type IconName =
   | "apps"
   | "bell"
@@ -90,10 +114,15 @@ interface UiState {
   localCasts: FeedCast[];
   feedInteractions: FeedInteractionMap;
   replyTargetCastId?: string;
+  pendingWriteIntent?: PendingWriteIntent;
+  writeAccessClientIdDraft: string;
+  writeAccessApiKeyDraft: string;
+  writeAccessStatus: "idle" | "connecting";
+  writeAccessError?: string;
 }
 
 interface FocusTarget {
-  field: "search" | "composer";
+  field: "search" | "composer" | "write-client-id" | "write-api-key";
   start?: number;
   end?: number;
 }
@@ -117,11 +146,22 @@ interface FeedInteractionState {
 
 type FeedInteractionMap = Record<string, FeedInteractionState>;
 
+type PendingWriteIntent =
+  | {
+      kind: "publish-cast";
+    }
+  | {
+      kind: "reaction";
+      castId: string;
+      reactionType: "like" | "recast";
+    };
+
 const STORAGE_KEYS = {
   farcasterProfile: "hypecast:farcaster-profile",
   composerDraft: "hypecast:composer-draft",
   localCasts: "hypecast:local-casts",
   feedInteractions: "hypecast:feed-interactions",
+  feedInteractionsMigrated: "hypecast:feed-interactions-v2-migrated",
   mutedAuthors: "hypecast:muted-authors",
   blockedAuthors: "hypecast:blocked-authors",
   dismissedCastIds: "hypecast:dismissed-cast-ids"
@@ -382,6 +422,19 @@ function loadStoredLocalCasts(): FeedCast[] {
     .filter((cast): cast is FeedCast => cast !== null);
 }
 
+function migrateLegacyFeedInteractions(): void {
+  try {
+    if (window.localStorage.getItem(STORAGE_KEYS.feedInteractionsMigrated) === "1") {
+      return;
+    }
+
+    window.localStorage.removeItem(STORAGE_KEYS.feedInteractions);
+    window.localStorage.setItem(STORAGE_KEYS.feedInteractionsMigrated, "1");
+  } catch {
+    // Ignore storage failures and keep the app usable.
+  }
+}
+
 function saveStoredLocalCasts(casts: FeedCast[]): void {
   if (casts.length === 0) {
     removeStoredValue(STORAGE_KEYS.localCasts);
@@ -392,6 +445,7 @@ function saveStoredLocalCasts(casts: FeedCast[]): void {
 }
 
 function loadStoredFeedInteractions(): FeedInteractionMap {
+  migrateLegacyFeedInteractions();
   return normalizeStoredFeedInteractions(loadStoredJson<unknown>(STORAGE_KEYS.feedInteractions));
 }
 
@@ -526,7 +580,12 @@ function getInitialUiState(): UiState {
     searchQuery: "",
     composerDraft: loadStoredComposerDraft(),
     localCasts: loadStoredLocalCasts(),
-    feedInteractions: loadStoredFeedInteractions()
+    feedInteractions: loadStoredFeedInteractions(),
+    pendingWriteIntent: undefined,
+    writeAccessClientIdDraft: loadStoredNeynarClientId() || getDefaultNeynarClientId(),
+    writeAccessApiKeyDraft: loadStoredNeynarApiKey(),
+    writeAccessStatus: "idle",
+    writeAccessError: undefined
   };
 }
 
@@ -816,41 +875,89 @@ function buildLocalCast(state: AppState, ui: UiState, text: string): FeedCast {
         : `in ${source?.label ?? channel}`,
     replyToCastId: replyTarget?.id,
     text,
-    permalink: undefined,
-    localOnly: true
+    permalink: undefined
   };
 }
 
 function hasRealFarcasterWriteConfigured(): boolean {
-  return false;
-}
+  const clientId = getEffectiveNeynarClientId();
+  const apiKey = getEffectiveNeynarApiKey();
 
-function localPublishButtonLabel(state: AppState, ui: UiState): string {
-  if (state.farcaster.status !== "connected") {
-    return "Sign in to post locally";
+  if (!clientId || !apiKey) {
+    return false;
   }
 
-  return ui.replyTargetCastId ? "Reply in Hypecast only" : "Post in Hypecast only";
+  return hasMatchingFarcasterWriteSession({
+    clientId,
+    apiKey
+  });
 }
 
-function localPublishSupportCopy(state: AppState, ui: UiState): string {
-  if (hasRealFarcasterWriteConfigured()) {
-    return ui.replyTargetCastId
-      ? "Replies publish to Farcaster and should appear in other clients."
-      : "Posts publish to Farcaster and should appear in other clients.";
-  }
+function publishButtonLabel(ui: UiState): string {
+  return ui.replyTargetCastId ? "Reply on Farcaster" : "Post to Farcaster";
+}
 
+function publishSupportCopy(ui: UiState): string {
   return ui.replyTargetCastId
-    ? "Replies stay local to Hypecast for now and will not appear in Warpcast or other Farcaster clients."
-    : "Posts stay local to Hypecast for now and will not appear in Warpcast or other Farcaster clients.";
+    ? hasRealFarcasterWriteConfigured()
+      ? "Replies publish to Farcaster and should appear in other clients."
+      : "Replies publish to Farcaster after you connect write access the first time."
+    : hasRealFarcasterWriteConfigured()
+      ? "Posts publish to Farcaster and should appear in other clients."
+      : "Posts publish to Farcaster after you connect write access the first time.";
 }
 
 function renderLocalOnlyPill(cast: FeedCast): string {
-  if (!cast.localOnly) {
-    return "";
+  void cast;
+  return "";
+}
+
+function currentWriteCredentials(ui?: Pick<UiState, "writeAccessClientIdDraft" | "writeAccessApiKeyDraft">): {
+  clientId: string;
+  apiKey: string;
+} {
+  const defaultClientId = getDefaultNeynarClientId();
+  const defaultApiKey = getDefaultNeynarApiKey();
+  const storedClientId = loadStoredNeynarClientId();
+  const storedApiKey = loadStoredNeynarApiKey();
+
+  if (ui) {
+    const clientId = ui.writeAccessClientIdDraft.trim() || defaultClientId;
+    const canUseDefaultApiKey = Boolean(defaultClientId) && clientId === defaultClientId;
+
+    return {
+      clientId,
+      apiKey: ui.writeAccessApiKeyDraft.trim() || (canUseDefaultApiKey ? defaultApiKey : "")
+    };
   }
 
-  return `<span class="context-pill context-pill-local">local only</span>`;
+  const clientId = storedClientId || defaultClientId;
+  const canUseDefaultApiKey = Boolean(defaultClientId) && clientId === defaultClientId;
+  const apiKey = storedApiKey || (canUseDefaultApiKey ? defaultApiKey : "");
+
+  return {
+    clientId,
+    apiKey
+  };
+}
+
+function reactionTargetForCast(cast: FeedCast): string | undefined {
+  if (/^0x[0-9a-f]{40}$/i.test(cast.id)) {
+    return cast.id;
+  }
+
+  return sanitizeLinkUrl(cast.permalink);
+}
+
+function mergeFarcasterProfile(
+  currentProfile: FarcasterProfile | undefined,
+  incomingProfile: FarcasterProfile
+): FarcasterProfile {
+  return {
+    ...currentProfile,
+    ...incomingProfile,
+    fid: incomingProfile.fid
+  };
 }
 
 function renderAvatar(
@@ -1041,40 +1148,6 @@ function renderFeedActionButton(options: {
   `;
 }
 
-function renderLocalReactionNotice(cast: FeedCast, ui: UiState): string {
-  if (hasRealFarcasterWriteConfigured()) {
-    return "";
-  }
-
-  const interaction = feedInteractionState(ui, cast.id);
-  const activeActions: string[] = [];
-
-  if (interaction.liked) {
-    activeActions.push("Like");
-  }
-
-  if (interaction.recasted) {
-    activeActions.push("Recast");
-  }
-
-  if (activeActions.length === 0) {
-    return "";
-  }
-
-  const safePermalink = sanitizeLinkUrl(cast.permalink);
-
-  return `
-    <div class="feed-action-status" data-feed-action-status>
-      <p>${escapeHtml(`${activeActions.join(" + ")} saved in Hypecast only. It has not been sent to Farcaster.`)}</p>
-      ${
-        safePermalink
-          ? `<a class="feed-action-status-link" href="${escapeAttribute(safePermalink)}" target="_blank" rel="noreferrer">Open on Farcaster</a>`
-          : ""
-      }
-    </div>
-  `;
-}
-
 function renderFeedActions(cast: FeedCast, state: AppState, ui: UiState): string {
   const interaction = feedInteractionState(ui, cast.id);
   const replyTarget = getReplyTargetCast(state, ui);
@@ -1119,7 +1192,6 @@ function renderFeedActions(cast: FeedCast, state: AppState, ui: UiState): string
           tone: "share"
         })}
       </div>
-      ${renderLocalReactionNotice(cast, ui)}
     </div>
   `;
 }
@@ -1970,6 +2042,15 @@ function renderProfileOverlay(state: AppState): string {
   const storedNeynarApiKey = loadStoredNeynarApiKey();
   const defaultNeynarApiKey = getDefaultNeynarApiKey();
   const effectiveNeynarApiKey = getEffectiveNeynarApiKey();
+  const effectiveWriteClientId = getEffectiveNeynarClientId();
+  const hasWriteAccess = Boolean(
+    effectiveWriteClientId &&
+      effectiveNeynarApiKey &&
+      hasMatchingFarcasterWriteSession({
+        clientId: effectiveWriteClientId,
+        apiKey: effectiveNeynarApiKey
+      })
+  );
   const usingStoredNeynarApiKey = Boolean(storedNeynarApiKey);
   const usingDefaultNeynarApiKey = !usingStoredNeynarApiKey && Boolean(defaultNeynarApiKey);
   const personalizedFeedReady = Boolean(profile?.fid && effectiveNeynarApiKey);
@@ -1989,6 +2070,11 @@ function renderProfileOverlay(state: AppState): string {
       : usingDefaultNeynarApiKey
         ? "The app's built-in Neynar key is ready. Sign in with Farcaster to load your following feed."
         : "Paste a Neynar API key to load your real following feed in this browser.";
+  const writeHelperText = hasWriteAccess
+    ? "Like, recast, and publish actions are ready to write to Farcaster from this browser."
+    : effectiveWriteClientId
+      ? "Client credentials are present. Connect once with Neynar to approve a Farcaster signer for write actions."
+      : "Write actions collect a Neynar client ID and matching API key the first time you like, recast, or post.";
 
   return `
     <div class="overlay-backdrop">
@@ -2059,6 +2145,17 @@ function renderProfileOverlay(state: AppState): string {
             </button>
             <button class="primary-button" type="button" data-action="refresh-feed" ${personalizedFeedReady ? "" : "disabled"}>
               Refresh following feed
+            </button>
+          </div>
+        </div>
+        <div class="feed-config-card">
+          <p class="eyebrow-label">write access</p>
+          <h3>Post and react on Farcaster</h3>
+          <p class="eyebrow-label">${escapeHtml(hasWriteAccess ? "Connected" : effectiveWriteClientId ? "Client ID ready" : "Needs setup")}</p>
+          <p class="support-copy">${escapeHtml(writeHelperText)}</p>
+          <div class="action-grid">
+            <button class="primary-button" type="button" data-action="open-write-access">
+              ${escapeHtml(hasWriteAccess ? "Reconnect write access" : "Connect write access")}
             </button>
           </div>
         </div>
@@ -2149,10 +2246,10 @@ function renderSettingsOverlay(state: AppState): string {
 
 function renderComposerOverlay(state: AppState, ui: UiState): string {
   const draftLength = ui.composerDraft.trim().length;
-  const canPublish = state.farcaster.status === "connected" && draftLength > 0;
+  const canPublish = draftLength > 0;
   const replyTarget = getReplyTargetCast(state, ui);
-  const publishLabel = localPublishButtonLabel(state, ui);
-  const publishSupport = localPublishSupportCopy(state, ui);
+  const publishLabel = publishButtonLabel(ui);
+  const publishSupport = publishSupportCopy(ui);
 
   return `
     <div class="overlay-backdrop">
@@ -2185,17 +2282,15 @@ function renderComposerOverlay(state: AppState, ui: UiState): string {
               <strong>${escapeHtml(profileName(state.farcaster.profile))}</strong>
               <p class="support-copy">
                 Drafts save locally on this device. ${
-                  state.farcaster.status === "connected"
-                    ? replyTarget
-                      ? "Posting adds a local reply to the Hypecast feed and updates the reply count."
-                      : "Posting adds a local cast to the Hypecast feed."
-                    : "Sign in with Farcaster when you want to post locally in Hypecast."
+                  hasRealFarcasterWriteConfigured()
+                    ? "Published casts are added to the Hypecast feed right away."
+                    : "Connect write access on the first post to publish on Farcaster."
                 }
               </p>
             </div>
           </div>
-          <div class="composer-note composer-note-local">
-            <p class="eyebrow-label">local only</p>
+          <div class="composer-note composer-note-write">
+            <p class="eyebrow-label">farcaster write</p>
             <p class="support-copy">${escapeHtml(publishSupport)}</p>
           </div>
           <textarea
@@ -2218,6 +2313,97 @@ function renderComposerOverlay(state: AppState, ui: UiState): string {
             canPublish ? "" : "disabled"
           }>
             ${escapeHtml(publishLabel)}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderWriteAccessOverlay(ui: UiState): string {
+  if (ui.overlay !== "write-access") {
+    return "";
+  }
+
+  const pendingIntent = ui.pendingWriteIntent;
+  const defaultClientId = getDefaultNeynarClientId();
+  const defaultApiKey = getDefaultNeynarApiKey();
+  const trimmedClientId = ui.writeAccessClientIdDraft.trim();
+  const trimmedApiKey = ui.writeAccessApiKeyDraft.trim();
+  const canUseDefaultApiKey = Boolean(defaultClientId) && trimmedClientId === defaultClientId;
+  const effectiveApiKey = trimmedApiKey || (canUseDefaultApiKey ? defaultApiKey : "");
+  const canContinue = Boolean(trimmedClientId && effectiveApiKey && ui.writeAccessStatus !== "connecting");
+  const originLabel = window.location.origin;
+  const intentLabel =
+    pendingIntent?.kind === "publish-cast"
+      ? "Publish your cast to Farcaster."
+      : pendingIntent?.reactionType === "like"
+        ? "Like this cast on Farcaster."
+        : pendingIntent?.reactionType === "recast"
+          ? "Recast this cast on Farcaster."
+          : "Authorize Farcaster writes for this browser.";
+
+  return `
+    <div class="overlay-backdrop">
+      <section class="overlay-sheet" role="dialog" aria-modal="true" aria-label="Connect write access">
+        <div class="sheet-head">
+          <div>
+            <p class="eyebrow-label">write access</p>
+            <h2>Connect Farcaster writes</h2>
+            <p class="support-copy">${escapeHtml(intentLabel)}</p>
+          </div>
+          <button class="icon-button" type="button" data-action="close-overlay" aria-label="Close write access">
+            ${renderIcon("close")}
+          </button>
+        </div>
+        <div class="composer-note composer-note-write">
+          <p class="eyebrow-label">neynar app pair</p>
+          <p class="support-copy">Client ID and API key must come from the same Neynar app, and that app needs <strong>${escapeHtml(originLabel)}</strong> in its authorized origins.</p>
+        </div>
+        <div class="write-access-fields">
+          <label class="write-access-label" for="write-client-id">Neynar client ID</label>
+          <label class="secret-field">
+            <input
+              id="write-client-id"
+              type="text"
+              data-input="write-client-id"
+              value="${escapeAttribute(ui.writeAccessClientIdDraft)}"
+              placeholder="00b75745-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+            />
+          </label>
+          <label class="write-access-label" for="write-api-key">Neynar API key</label>
+          <label class="secret-field">
+            <input
+              id="write-api-key"
+              type="password"
+              data-input="write-api-key"
+              value="${escapeAttribute(ui.writeAccessApiKeyDraft)}"
+              placeholder="${escapeAttribute(canUseDefaultApiKey ? "Optional when using the app default client ID" : "Matching Neynar API key")}"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+            />
+          </label>
+        </div>
+        ${
+          ui.writeAccessError
+            ? `
+              <div class="write-access-error" role="status">
+                <strong>Couldn’t connect write access.</strong>
+                <p class="support-copy">${escapeHtml(ui.writeAccessError)}</p>
+              </div>
+            `
+            : ""
+        }
+        <div class="action-grid">
+          <button class="secondary-button" type="button" data-action="clear-write-access-config">
+            Clear saved write access
+          </button>
+          <button class="primary-button" type="button" data-action="connect-write-access" ${canContinue ? "" : "disabled"}>
+            ${escapeHtml(ui.writeAccessStatus === "connecting" ? "Connecting..." : "Continue with Neynar")}
           </button>
         </div>
       </section>
@@ -2329,6 +2515,8 @@ function renderCastMenuOverlay(state: AppState, ui: UiState): string {
 
 function renderOverlay(state: AppState, ui: UiState): string {
   switch (ui.overlay) {
+    case "write-access":
+      return renderWriteAccessOverlay(ui);
     case "cast-menu":
       return renderCastMenuOverlay(state, ui);
     case "media":
@@ -2446,6 +2634,7 @@ export function createApp(root: HTMLDivElement): void {
     startY: 0
   };
   let walletSession: WalletSession | null = null;
+  let farcasterWriteSession: FarcasterWriteSession | null = loadStoredFarcasterWriteSession() ?? null;
   let xmtpSession: Awaited<ReturnType<typeof connectXmtp>> | null = null;
   let activeFeedRefreshPromise: Promise<void> | null = null;
   let activeRouteResolutionId = 0;
@@ -2530,7 +2719,13 @@ export function createApp(root: HTMLDivElement): void {
     }
 
     const selector =
-      focusTarget.field === "search" ? '[data-input="search"]' : '[data-input="composer"]';
+      focusTarget.field === "search"
+        ? '[data-input="search"]'
+        : focusTarget.field === "composer"
+          ? '[data-input="composer"]'
+          : focusTarget.field === "write-client-id"
+            ? '[data-input="write-client-id"]'
+            : '[data-input="write-api-key"]';
     const element = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector);
 
     if (!element) {
@@ -2595,10 +2790,83 @@ export function createApp(root: HTMLDivElement): void {
     ui.routedCast = undefined;
   };
 
+  const syncWriteAccessDraftsFromStorage = () => {
+    ui.writeAccessClientIdDraft = loadStoredNeynarClientId() || getDefaultNeynarClientId();
+    ui.writeAccessApiKeyDraft = loadStoredNeynarApiKey();
+  };
+
+  const openWriteAccessOverlay = (
+    intent?: PendingWriteIntent,
+    options: RenderOptions & {
+      error?: string;
+      preserveShellScroll?: boolean;
+    } = {}
+  ) => {
+    syncWriteAccessDraftsFromStorage();
+    ui.pendingWriteIntent = intent;
+    ui.writeAccessStatus = "idle";
+    ui.writeAccessError = options.error;
+    ui.overlay = "write-access";
+    ui.mediaViewer = undefined;
+    ui.activeCastId = undefined;
+    const shouldFocusClientId = !ui.writeAccessClientIdDraft.trim();
+    const shouldFocusApiKey =
+      !shouldFocusClientId && !currentWriteCredentials(ui).apiKey && !ui.writeAccessApiKeyDraft.trim();
+    const focusTarget = shouldFocusClientId
+      ? {
+          field: "write-client-id" as const,
+          start: 0,
+          end: ui.writeAccessClientIdDraft.length
+        }
+      : shouldFocusApiKey
+        ? {
+            field: "write-api-key" as const,
+            start: 0,
+            end: ui.writeAccessApiKeyDraft.length
+          }
+        : undefined;
+
+    render(focusTarget, {
+      preserveShellScroll: options.preserveShellScroll ?? true
+    });
+  };
+
+  const currentWriteSession = (): FarcasterWriteSession | null => {
+    const credentials = currentWriteCredentials();
+
+    if (!credentials.clientId || !credentials.apiKey) {
+      return null;
+    }
+
+    farcasterWriteSession ??= loadStoredFarcasterWriteSession() ?? null;
+
+    if (
+      !farcasterWriteSession ||
+      farcasterWriteSession.clientId !== credentials.clientId ||
+      farcasterWriteSession.apiKey !== credentials.apiKey
+    ) {
+      return null;
+    }
+
+    return farcasterWriteSession;
+  };
+
+  const applyConnectedFarcasterProfile = (profile: FarcasterProfile) => {
+    const nextProfile = mergeFarcasterProfile(state.farcaster.profile, profile);
+    state.farcaster = {
+      status: "connected",
+      profile: nextProfile
+    };
+    saveStoredProfile(nextProfile);
+  };
+
   const closeOverlay = (options: RenderOptions = {}) => {
     ui.overlay = "none";
     ui.mediaViewer = undefined;
     ui.activeCastId = undefined;
+    ui.pendingWriteIntent = undefined;
+    ui.writeAccessStatus = "idle";
+    ui.writeAccessError = undefined;
     render(undefined, options);
   };
 
@@ -2674,41 +2942,6 @@ export function createApp(root: HTMLDivElement): void {
           count: likeCountForCast(cast, ui)
         })
       );
-
-    const affectedFeedCards = new Set<HTMLElement>();
-
-    root
-      .querySelectorAll<HTMLElement>(
-        `.feed-card [data-action="like-cast"][data-cast-id="${CSS.escape(castId)}"], .feed-card [data-action="recast-cast"][data-cast-id="${CSS.escape(castId)}"]`
-      )
-      .forEach((button) => {
-        const feedCard = button.closest<HTMLElement>(".feed-card");
-
-        if (feedCard) {
-          affectedFeedCards.add(feedCard);
-        }
-      });
-
-    const noticeMarkup = renderLocalReactionNotice(cast, ui);
-
-    affectedFeedCards.forEach((feedCard) => {
-      const statusContainer = feedCard.querySelector<HTMLElement>("[data-feed-action-status]");
-
-      if (statusContainer) {
-        if (noticeMarkup) {
-          statusContainer.outerHTML = noticeMarkup;
-        } else {
-          statusContainer.remove();
-        }
-        return;
-      }
-
-      if (noticeMarkup) {
-        feedCard
-          .querySelector<HTMLElement>(".feed-actions-wrap")
-          ?.insertAdjacentHTML("beforeend", noticeMarkup);
-      }
-    });
   };
 
   const upsertAuthorFilter = (targetList: string[], authorHandle: string | undefined): boolean => {
@@ -2922,6 +3155,88 @@ export function createApp(root: HTMLDivElement): void {
     syncFeedInteractionUi(castId);
   };
 
+  const buildPublishedCast = (text: string, hash: string): FeedCast => {
+    const nextCast = buildLocalCast(state, ui, text);
+    return {
+      ...nextCast,
+      id: hash
+    };
+  };
+
+  const executePendingWriteIntent = async (session: FarcasterWriteSession) => {
+    const pendingIntent = ui.pendingWriteIntent;
+    ui.pendingWriteIntent = undefined;
+
+    if (!pendingIntent) {
+      return;
+    }
+
+    if (pendingIntent.kind === "publish-cast") {
+      await handlePublishCast(session);
+      return;
+    }
+
+    await handleReaction(pendingIntent.castId, pendingIntent.reactionType, session);
+  };
+
+  const handleWriteAccessConnect = async () => {
+    const credentials = currentWriteCredentials(ui);
+
+    if (!credentials.clientId) {
+      ui.writeAccessError = "Enter a Neynar client ID to request write access.";
+      render(undefined, {
+        preserveShellScroll: true
+      });
+      return;
+    }
+
+    if (!credentials.apiKey) {
+      ui.writeAccessError = "Enter the matching Neynar API key for that client ID.";
+      render(undefined, {
+        preserveShellScroll: true
+      });
+      return;
+    }
+
+    ui.writeAccessStatus = "connecting";
+    ui.writeAccessError = undefined;
+    render(undefined, {
+      preserveShellScroll: true
+    });
+
+    try {
+      const { session, profile } = await connectFarcasterWriteAccess(credentials);
+
+      farcasterWriteSession = session;
+      saveStoredNeynarClientId(session.clientId);
+
+      if (ui.writeAccessApiKeyDraft.trim()) {
+        saveStoredNeynarApiKey(ui.writeAccessApiKeyDraft.trim());
+      } else {
+        clearStoredNeynarApiKey();
+      }
+
+      saveStoredFarcasterWriteSession(session);
+      applyConnectedFarcasterProfile(profile);
+
+      ui.overlay = "none";
+      ui.writeAccessStatus = "idle";
+      ui.writeAccessError = undefined;
+      render(undefined, {
+        preserveShellScroll: true
+      });
+      void refreshFeedSnapshot();
+      await executePendingWriteIntent(session);
+    } catch (error) {
+      ui.writeAccessStatus = "idle";
+      ui.writeAccessError =
+        error instanceof Error ? error.message : "Write access could not be connected.";
+      render(undefined, {
+        preserveShellScroll: true
+      });
+    }
+  };
+
   const refreshFeedSnapshot = async () => {
     if (activeFeedRefreshPromise) {
       return activeFeedRefreshPromise;
@@ -2982,26 +3297,148 @@ export function createApp(root: HTMLDivElement): void {
     return activeFeedRefreshPromise;
   };
 
-  const handlePublishCast = () => {
-    if (state.farcaster.status !== "connected") {
+  const handleReaction = async (
+    castId: string,
+    reactionType: "like" | "recast",
+    sessionOverride?: FarcasterWriteSession
+  ) => {
+    const cast = getCastById(state, ui, castId);
+
+    if (!cast) {
       return;
     }
 
+    const session = sessionOverride ?? currentWriteSession();
+
+    if (!session) {
+      openWriteAccessOverlay(
+        {
+          kind: "reaction",
+          castId,
+          reactionType
+        },
+        {
+          preserveShellScroll: true
+        }
+      );
+      return;
+    }
+
+    const target = reactionTargetForCast(cast);
+
+    if (!target) {
+      openWriteAccessOverlay(
+        {
+          kind: "reaction",
+          castId,
+          reactionType
+        },
+        {
+          error: "This cast does not expose a Farcaster hash or permalink yet, so it can’t be reacted to from Hypecast.",
+          preserveShellScroll: true
+        }
+      );
+      return;
+    }
+
+    try {
+      await publishReaction({
+        apiKey: session.apiKey,
+        signerUuid: session.signerUuid,
+        reactionType,
+        target,
+        targetAuthorFid: cast.authorFid,
+        remove:
+          reactionType === "like"
+            ? feedInteractionState(ui, castId).liked === true
+            : feedInteractionState(ui, castId).recasted === true
+      });
+      toggleFeedInteraction(castId, reactionType === "like" ? "liked" : "recasted");
+    } catch (error) {
+      if (isNeynarPermissionError(error)) {
+        farcasterWriteSession = null;
+        clearStoredFarcasterWriteSession();
+      }
+
+      openWriteAccessOverlay(
+        {
+          kind: "reaction",
+          castId,
+          reactionType
+        },
+        {
+          error: error instanceof Error ? error.message : "The Farcaster reaction could not be completed.",
+          preserveShellScroll: true
+        }
+      );
+    }
+  };
+
+  const handlePublishCast = async (sessionOverride?: FarcasterWriteSession) => {
     const draft = ui.composerDraft.trim();
 
     if (!draft) {
       return;
     }
 
-    const nextCast = buildLocalCast(state, ui, draft);
-    ui.localCasts = [nextCast, ...ui.localCasts];
-    saveStoredLocalCasts(ui.localCasts);
-    clearComposerDraft();
-    clearReplyTarget();
-    ui.activePane = "home";
-    ui.activeTimeline = nextCast.channel;
-    ui.overlay = "none";
-    render();
+    const session = sessionOverride ?? currentWriteSession();
+
+    if (!session) {
+      openWriteAccessOverlay({
+        kind: "publish-cast"
+      });
+      return;
+    }
+
+    const replyTarget = getReplyTargetCast(state, ui);
+    const parent = replyTarget ? reactionTargetForCast(replyTarget) : undefined;
+
+    if (replyTarget && !parent) {
+      openWriteAccessOverlay(
+        {
+          kind: "publish-cast"
+        },
+        {
+          error: "That reply target does not expose a Farcaster hash or permalink yet, so Hypecast can’t publish a reply to it."
+        }
+      );
+      return;
+    }
+
+    try {
+      const response = await publishCast({
+        apiKey: session.apiKey,
+        signerUuid: session.signerUuid,
+        text: draft,
+        parent,
+        parentAuthorFid: replyTarget?.authorFid
+      });
+      const nextCast = buildPublishedCast(draft, response.hash);
+
+      ui.localCasts = [nextCast, ...ui.localCasts];
+      saveStoredLocalCasts(ui.localCasts);
+      clearComposerDraft();
+      clearReplyTarget();
+      ui.activePane = "home";
+      ui.activeTimeline = nextCast.channel;
+      ui.overlay = "none";
+      render();
+      void refreshFeedSnapshot();
+    } catch (error) {
+      if (isNeynarPermissionError(error)) {
+        farcasterWriteSession = null;
+        clearStoredFarcasterWriteSession();
+      }
+
+      openWriteAccessOverlay(
+        {
+          kind: "publish-cast"
+        },
+        {
+          error: error instanceof Error ? error.message : "The Farcaster cast could not be published."
+        }
+      );
+    }
   };
 
   const handleInstall = async () => {
@@ -3410,6 +3847,11 @@ export function createApp(root: HTMLDivElement): void {
             : undefined
         );
         break;
+      case "open-write-access":
+        openWriteAccessOverlay(undefined, {
+          preserveShellScroll: true
+        });
+        break;
       case "settings":
         ui.mediaViewer = undefined;
         ui.activeCastId = undefined;
@@ -3436,14 +3878,14 @@ export function createApp(root: HTMLDivElement): void {
           break;
         }
 
-        toggleFeedInteraction(castId, "recasted");
+        void handleReaction(castId, "recast");
         break;
       case "like-cast":
         if (!castId) {
           break;
         }
 
-        toggleFeedInteraction(castId, "liked");
+        void handleReaction(castId, "like");
         break;
       case "share-cast":
         if (!castId) {
@@ -3549,7 +3991,22 @@ export function createApp(root: HTMLDivElement): void {
         render({ field: "composer", start: 0, end: 0 });
         break;
       case "publish-cast":
-        handlePublishCast();
+        void handlePublishCast();
+        break;
+      case "connect-write-access":
+        void handleWriteAccessConnect();
+        break;
+      case "clear-write-access-config":
+        clearStoredFarcasterWriteSession();
+        clearStoredNeynarClientId();
+        farcasterWriteSession = null;
+        ui.writeAccessClientIdDraft = getDefaultNeynarClientId();
+        ui.writeAccessApiKeyDraft = "";
+        ui.writeAccessError = undefined;
+        ui.writeAccessStatus = "idle";
+        render(undefined, {
+          preserveShellScroll: true
+        });
         break;
       case "save-feed-key": {
         const input = root.querySelector<HTMLInputElement>('[data-field="neynar-api-key"]');
@@ -3561,11 +4018,14 @@ export function createApp(root: HTMLDivElement): void {
           clearStoredNeynarApiKey();
         }
 
+        farcasterWriteSession = loadStoredFarcasterWriteSession() ?? farcasterWriteSession;
+
         void refreshFeedSnapshot();
         break;
       }
       case "clear-feed-key":
         clearStoredNeynarApiKey();
+        farcasterWriteSession = loadStoredFarcasterWriteSession() ?? farcasterWriteSession;
         void refreshFeedSnapshot();
         break;
       case "refresh-feed":
@@ -3610,6 +4070,32 @@ export function createApp(root: HTMLDivElement): void {
         start: event.target.selectionStart ?? event.target.value.length,
         end: event.target.selectionEnd ?? event.target.value.length
       });
+      return;
+    }
+
+    if (event.target.dataset.input === "write-client-id") {
+      ui.writeAccessClientIdDraft = event.target.value;
+      ui.writeAccessError = undefined;
+      render({
+        field: "write-client-id",
+        start: event.target.selectionStart ?? event.target.value.length,
+        end: event.target.selectionEnd ?? event.target.value.length
+      }, {
+        preserveShellScroll: true
+      });
+      return;
+    }
+
+    if (event.target.dataset.input === "write-api-key") {
+      ui.writeAccessApiKeyDraft = event.target.value;
+      ui.writeAccessError = undefined;
+      render({
+        field: "write-api-key",
+        start: event.target.selectionStart ?? event.target.value.length,
+        end: event.target.selectionEnd ?? event.target.value.length
+      }, {
+        preserveShellScroll: true
+      });
     }
   });
 
@@ -3619,7 +4105,8 @@ export function createApp(root: HTMLDivElement): void {
     }
 
     closeOverlay({
-      preserveShellScroll: ui.overlay === "media" || ui.overlay === "cast-menu"
+      preserveShellScroll:
+        ui.overlay === "media" || ui.overlay === "cast-menu" || ui.overlay === "write-access"
     });
   });
 

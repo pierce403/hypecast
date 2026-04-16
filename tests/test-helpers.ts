@@ -51,11 +51,29 @@ interface FeedMockOptions {
   snapshot?: FeedSnapshot;
 }
 
+interface WriteMockOptions {
+  clientId?: string;
+  apiKey?: string;
+  connectError?: string;
+  reactionError?: string;
+  castError?: string;
+  session?: {
+    fid?: number;
+    signerUuid?: string;
+    username?: string;
+    displayName?: string;
+    bio?: string;
+    pfpUrl?: string;
+  };
+  preconnected?: boolean;
+}
+
 export interface HypecastMockOptions {
   isStandalone?: boolean;
   feed?: FeedMockOptions;
   wallet?: WalletMockOptions;
   farcaster?: FarcasterMockOptions;
+  write?: WriteMockOptions;
   xmtp?: XmtpMockOptions;
 }
 
@@ -134,7 +152,58 @@ export async function mountApp(
       accountIdentifier: defaultWallet.address.toLowerCase(),
       installationId: "installation-123"
     };
+    const defaultWrite = {
+      fid: defaultProfile.fid,
+      signer_uuid: "7d88d5b3-5a07-4e25-a7d1-c2a8133177a9",
+      user: {
+        fid: defaultProfile.fid,
+        username: defaultProfile.username,
+        display_name: defaultProfile.displayName,
+        pfp_url: defaultProfile.pfpUrl,
+        profile: {
+          bio: {
+            text: defaultProfile.bio
+          }
+        }
+      }
+    };
     let feedLoadCount = 0;
+    let castPublishCount = 0;
+
+    if (input.write?.clientId) {
+      window.localStorage.setItem("hypecast:neynar-client-id", input.write.clientId);
+    }
+
+    if (input.write?.apiKey) {
+      window.localStorage.setItem("hypecast:neynar-api-key", input.write.apiKey);
+    }
+
+    if (input.write?.preconnected && input.write?.clientId && input.write?.apiKey) {
+      window.localStorage.setItem(
+        "hypecast:farcaster-profile",
+        JSON.stringify({
+          fid: input.write.session?.fid ?? defaultProfile.fid,
+          username: input.write.session?.username ?? defaultProfile.username,
+          displayName: input.write.session?.displayName ?? defaultProfile.displayName,
+          bio: input.write.session?.bio ?? defaultProfile.bio,
+          pfpUrl: input.write.session?.pfpUrl ?? defaultProfile.pfpUrl,
+          custody: defaultWallet.address
+        })
+      );
+      window.localStorage.setItem(
+        "hypecast:farcaster-write-session",
+        JSON.stringify({
+          fid: input.write.session?.fid ?? defaultProfile.fid,
+          signerUuid: input.write.session?.signerUuid ?? defaultWrite.signer_uuid,
+          clientId: input.write.clientId,
+          apiKey: input.write.apiKey,
+          username: input.write.session?.username ?? defaultProfile.username,
+          displayName: input.write.session?.displayName ?? defaultProfile.displayName,
+          bio: input.write.session?.bio ?? defaultProfile.bio,
+          pfpUrl: input.write.session?.pfpUrl ?? defaultProfile.pfpUrl
+        })
+      );
+    }
 
     window.__HYPECAST_TEST_API__ = {
       isStandalone: input.isStandalone,
@@ -210,6 +279,47 @@ export async function mountApp(
         return {
           ...defaultProfile,
           ...input.farcaster?.profile
+        };
+      },
+      connectFarcasterWriteAccess: async ({ clientId, apiKey }) => {
+        if (input.write?.connectError) {
+          throw new Error(input.write.connectError);
+        }
+
+        return {
+          ...defaultWrite,
+          signer_uuid: input.write?.session?.signerUuid ?? defaultWrite.signer_uuid,
+          fid: input.write?.session?.fid ?? defaultWrite.fid,
+          user: {
+            ...defaultWrite.user,
+            fid: input.write?.session?.fid ?? defaultWrite.fid,
+            username: input.write?.session?.username ?? defaultProfile.username,
+            display_name: input.write?.session?.displayName ?? defaultProfile.displayName,
+            pfp_url: input.write?.session?.pfpUrl ?? defaultProfile.pfpUrl,
+            profile: {
+              bio: {
+                text: input.write?.session?.bio ?? defaultProfile.bio
+              }
+            }
+          },
+          clientId,
+          apiKey
+        };
+      },
+      publishReaction: async () => {
+        if (input.write?.reactionError) {
+          throw new Error(input.write.reactionError);
+        }
+      },
+      publishCast: async () => {
+        if (input.write?.castError) {
+          throw new Error(input.write.castError);
+        }
+
+        castPublishCount += 1;
+
+        return {
+          hash: `0x${String(castPublishCount).padStart(40, "1")}`
         };
       },
       connectXmtp: async ({ address }) => {

@@ -30,8 +30,8 @@
   - Feed video cards can start playback inline without sending the user out to the linked source page
   - Plain image/video attachments can render without redundant title/source captions
   - Pulling down from the top of the feed triggers a fresh snapshot request without moving the pinned bottom rail
-  - Reply, recast, and like controls now update local cast state directly inside the shell without rerendering the full feed
-  - Like and recast interactions explicitly warn when they were only saved inside Hypecast, and can deep-link back to the original cast when a Farcaster permalink is available
+  - Reply, recast, and like controls now wait for a real Farcaster write and then patch the local shell state without rerendering the full feed
+  - If a user tries to post, like, or recast without a signer, the shell opens an in-app write-access sheet and resumes the original action after Neynar auth succeeds
   - Cast overflow menus expose local delete, copy-link, mute, and block actions inside an in-app context sheet
   - Shared cast routes with `cast` and optional `fid` query params can reopen a targeted cast inside the feed shell, and route parsing also understands wrapped Farcaster/Warpcast URLs
 - **Test Criteria**:
@@ -45,8 +45,7 @@
   - [x] Link previews are actionable and image/video cards expose media downloads
   - [x] Video cards expose an inline play control inside the feed
   - [x] Pulling down at scroll-top refreshes the feed snapshot
-  - [x] Reply, recast, and like buttons mutate local shell state and counts
-  - [x] Local-only likes and recasts are visibly labeled so they are not mistaken for Farcaster network writes
+  - [x] Reply, recast, and like buttons complete through the write-access flow and then update shell state and counts
   - [x] Cast overflow actions can delete, copy, mute, and block locally inside Hypecast
   - [x] Shared cast routes reopen the requested cast in the shell on mobile and desktop
 
@@ -115,19 +114,18 @@
 
 ### Cast Composer And Publishing
 - **Stability**: in-progress
-- **Description**: The floating compose action now supports local drafts and signed-in local publishing inside the shell, while network cast publishing remains a future step.
+- **Description**: The floating compose action now preserves local drafts while publishing real casts and replies to Farcaster through a signer-backed Neynar flow.
 - **Properties**:
   - Composer opens as an in-app sheet from the floating action button
   - Draft state survives accidental sheet closes and page reloads on the same device
-  - Signed-in publishing posts a local cast into the feed using the authenticated Farcaster profile
-  - Reply actions route into the composer and publish local replies that increment the parent cast's reply count
-  - The composer and resulting cast cards explicitly mark those posts as local-only so they are not mistaken for Farcaster network writes
+  - The first post or reply can collect a Neynar client ID plus matching API key and authorize write access without leaving the shell
+  - Successful publishing adds the new Farcaster cast into the shell immediately using the approved signer session
+  - Reply actions route into the composer and publish Farcaster replies that increment the parent cast's reply count in the shell
 - **Test Criteria**:
   - [x] Compose button placement is present in the shell
   - [x] Draft text can be entered and preserved locally
-  - [x] Authenticated users can publish a cast successfully
-  - [x] Authenticated users can publish a reply from a feed action successfully
-  - [x] Local-only posting is clearly labeled before and after a cast is added to the Hypecast feed
+  - [x] Users can connect write access from the composer and publish a cast successfully
+  - [x] Users can publish a reply from a feed action successfully
 
 ### Notifications And Chat Delivery
 - **Stability**: planned

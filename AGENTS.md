@@ -62,6 +62,7 @@ Notes:
 - `src/app.ts`: top-level DOM rendering and interaction/state wiring
 - `src/config.ts`: runtime config parsing for RPC and XMTP environment
 - `src/services/feed.ts`: loads the public fallback feed plus the personalized Neynar following feed when a signed-in `fid` and stored API key are available
+- `src/services/neynar.ts`: handles Neynar write-access storage, popup auth, and Farcaster cast/reaction writes
 - `src/services/security.ts`: shared escaping and protocol-allowlist helpers for untrusted text and remote URLs
 - `src/test-support.ts`: browser-only test seam for Playwright mocks of standalone mode, wallet, Farcaster, and XMTP
 - `src/services/wallet.ts`: injected EVM wallet connection
@@ -115,6 +116,7 @@ Notes:
 - Keep `.bottom-nav` sticky with `bottom: 0` and `margin-top: auto` so it stays anchored to the phone shell edge while only `.shell-content` scrolls.
 - The personalized following feed currently uses Neynar from the browser with a built-in default client key, and optional browser-local overrides stored in `localStorage`. That is the practical Pages-compatible path today, but it is not the long-term secret-management model.
 - Hypecast now ships with the verified Converge Neynar client key as the built-in default. The account-sheet field is a browser-local override, not a required setup step.
+- Farcaster writes now depend on a Neynar client ID plus the matching API key from the same Neynar app. If the built-in client ID is absent, the first write action must collect both values from the user.
 - `index.html` now carries the repo's meta CSP and referrer policy. If new browser capabilities need extra origins or worker behavior, update the policy deliberately instead of loosening it blindly.
 
 ## Deployment Notes
@@ -153,11 +155,11 @@ Notes:
 - Fullscreen feed media now uses a fixed viewport overlay from `src/app.ts` with icon-only close/download controls. Keep image/video taps wired through `data-action="open-media-viewer"` and preserve `.shell-content` scroll when opening or closing that overlay.
 - Pull-to-refresh now lives on `.shell-content` in `src/app.ts` and only arms when Home is at scroll-top with no overlay open. Keep the gesture tied to the feed scroller so the bottom nav stays fixed.
 - Like/recast no longer need a full shell rerender; `src/app.ts` now patches those button counts/states in place. If those actions start jumping the feed again, inspect `toggleFeedInteraction()` and `syncFeedInteractionUi()` before touching broader render logic.
-- Hypecast still does not send likes or recasts to Farcaster. The feed now renders an explicit local-only reaction notice after those toggles and links back to the original cast when a permalink exists; keep that warning visible until a real signer-backed reaction write path exists.
 - Cast overflow actions are local-only moderation controls in `src/app.ts`: delete removes the cast from Hypecast, while mute/block hide authors in Hypecast without sending Farcaster network writes.
 - Shared cast routing now lives in `src/services/routes.ts` and `src/app.ts`. Keep copied links query-based (`?cast=...&fid=...`) so they work on GitHub Pages, and use the route-resolution token guard so stale async cast lookups cannot clear a newer routed cast.
-- Feed action counts are currently local-shell behavior: replies are derived from persisted local reply casts, and like/recast toggles are stored in `localStorage`. Preserve that relationship unless the product moves to a real write API.
-- Hypecast still does not have a signer-backed Farcaster write path. Composer/reply actions must stay explicitly labeled as local-only until a real network publish flow exists, otherwise users will assume the post should appear in Warpcast.
+- Hypecast now publishes casts plus like/recast reactions through `src/services/neynar.ts`. The first write can collect a Neynar client ID and matching API key, complete popup auth, then resume the original action.
+- A `signer_uuid` is paired with the Neynar API key that created it. If write auth behaves inconsistently, inspect `hypecast:neynar-client-id`, `hypecast:neynar-api-key`, and `hypecast:farcaster-write-session` together instead of changing just one value.
+- Feed action counts still patch locally after successful writes so the shell updates immediately, but the old purely local reaction state was migrated away by clearing `hypecast:feed-interactions` once under the `hypecast:feed-interactions-v2-migrated` flag.
 - Playwright now runs against both `mobile-chromium` and `desktop-chromium`. If layout changes are viewport-specific, keep assertions for both form factors green.
 
 ## Rapport & Reflection
@@ -165,6 +167,7 @@ Notes:
 - The collaborator prefers direct progress over long planning.
 - The collaborator wants each completed task committed and pushed to the remote instead of leaving local-only work behind.
 - The collaborator also wants post-push deploy status checked every time instead of assuming GitHub Pages succeeded.
+- The collaborator does not want fake “saved in Hypecast only” success states for Farcaster actions; missing requirements should be collected when the action is attempted.
 - Product direction so far: PWA first, mobile-friendly, accessible on web, wallet-native, Farcaster-integrated, XMTP-capable.
 - Keep responses concise and execution-oriented.
 - Update this file when collaborator preferences or product direction become clearer.

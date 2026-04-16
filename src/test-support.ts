@@ -1,6 +1,10 @@
 import type { Address } from "viem";
 
-import type { FarcasterProfile, FeedLoadOptions, FeedSnapshot } from "./types";
+import type {
+  FarcasterProfile,
+  FeedLoadOptions,
+  FeedSnapshot
+} from "./types";
 
 export interface HypecastTestWalletSession {
   address: Address;
@@ -35,6 +39,29 @@ export interface HypecastTestApi {
     nonce: string;
     onPoll?: () => void;
   }) => Promise<FarcasterProfile>;
+  connectFarcasterWriteAccess?: (options: {
+    clientId: string;
+    apiKey: string;
+  }) => Promise<{
+    fid?: number;
+    signer_uuid?: string;
+    user?: Record<string, unknown>;
+  }>;
+  publishReaction?: (options: {
+    apiKey: string;
+    signerUuid: string;
+    reactionType: "like" | "recast";
+    target: string;
+    targetAuthorFid?: number;
+    remove?: boolean;
+  }) => Promise<void>;
+  publishCast?: (options: {
+    apiKey: string;
+    signerUuid: string;
+    text: string;
+    parent?: string;
+    parentAuthorFid?: number;
+  }) => Promise<{ hash: string }>;
   connectXmtp?: (options: {
     address: Address;
     chainId: number;

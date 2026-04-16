@@ -22,6 +22,17 @@ export interface FarcasterProfile {
   custody?: Address;
 }
 
+export interface FarcasterWriteSession {
+  fid: number;
+  signerUuid: string;
+  clientId: string;
+  apiKey: string;
+  username?: string;
+  displayName?: string;
+  bio?: string;
+  pfpUrl?: string;
+}
+
 export interface FarcasterState {
   status: "idle" | "creating" | "pending" | "connected" | "error";
   qrCodeDataUrl?: string;

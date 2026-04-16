@@ -113,7 +113,7 @@ test("renders the mobile shell, filters snapshot tabs, and opens overlays", asyn
   await expect(
     page.getByRole("heading", { level: 2, name: "Composer placement is in" })
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sign in to post locally" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Post to Farcaster" })).toBeDisabled();
   await page.keyboard.press("Escape");
   await expect(
     page.getByRole("heading", { level: 2, name: "Composer placement is in" })
@@ -181,7 +181,7 @@ test("plays video inline from the feed card", async ({ page }) => {
   await expect(main.getByRole("button", { name: "Pause inline video" })).toHaveText("Pause");
 });
 
-test("reply, recast, and like buttons update cast state", async ({ page }) => {
+test("reply, recast, and like buttons publish through Farcaster write access", async ({ page }) => {
   const main = shellMain(page);
   const shellContent = page.locator(".shell-content");
   const replyText = "Shipping a real reply from the Hypecast shell.";
@@ -189,7 +189,12 @@ test("reply, recast, and like buttons update cast state", async ({ page }) => {
   const recastButton = main.locator('[data-action="recast-cast"][data-cast-id="cast-farcaster-snaps"]');
   const replyButton = main.locator('[data-action="reply-cast"][data-cast-id="cast-farcaster-snaps"]');
 
-  await mountApp(page);
+  await mountApp(page, {
+    write: {
+      clientId: "00b75745-test-client-id",
+      apiKey: "NEYNAR_WRITE_TEST_KEY"
+    }
+  });
 
   await page.getByRole("tab", { name: "farcaster" }).click();
   await expect(likeButton.locator(".feed-action-count")).toHaveText("29");
@@ -203,14 +208,11 @@ test("reply, recast, and like buttons update cast state", async ({ page }) => {
   expect(scrollBeforeLike).toBeGreaterThan(0);
 
   await likeButton.click();
+  await expect(page.getByRole("heading", { level: 2, name: "Connect Farcaster writes" })).toBeVisible();
+  await page.getByRole("button", { name: "Continue with Neynar" }).click();
   await expect(likeButton).toHaveAttribute("aria-pressed", "true");
   await expect(likeButton.locator(".feed-action-count")).toHaveText("30");
-  await expect(
-    main.getByText("Like saved in Hypecast only. It has not been sent to Farcaster.")
-  ).toBeVisible();
-  await expect(
-    main.locator('.feed-action-status-link[href="https://warpcast.com/farcaster/0xcastfarcastersnaps"]')
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Connect Farcaster writes" })).toHaveCount(0);
   await expect
     .poll(async () => shellContent.evaluate((node) => node.scrollTop))
     .toBeGreaterThan(0);
@@ -218,23 +220,15 @@ test("reply, recast, and like buttons update cast state", async ({ page }) => {
   await recastButton.click();
   await expect(recastButton).toHaveAttribute("aria-pressed", "true");
   await expect(recastButton.locator(".feed-action-count")).toHaveText("13");
-  await expect(
-    main.getByText("Like + Recast saved in Hypecast only. It has not been sent to Farcaster.")
-  ).toBeVisible();
-
-  await signInWithFarcaster(page);
-  await page.getByRole("button", { name: "Close account sheet" }).click();
 
   await replyButton.click();
   await expect(page.getByRole("heading", { level: 2, name: "Reply to @farcaster" })).toBeVisible();
-  await expect(
-    page.getByText("Replies stay local to Hypecast for now and will not appear in Warpcast or other Farcaster clients.")
-  ).toBeVisible();
+  await expect(page.getByText("Replies publish to Farcaster and should appear in other clients.")).toBeVisible();
   await page.getByPlaceholder("What’s happening on Hypecast?").fill(replyText);
-  await page.getByRole("button", { name: "Reply in Hypecast only" }).click();
+  await page.getByRole("button", { name: "Reply on Farcaster" }).click();
 
   await expect(main.getByText(replyText)).toBeVisible();
-  await expect(main.getByText("local only").first()).toBeVisible();
+  await expect(main.getByText("local only")).toHaveCount(0);
   await expect(replyButton.locator(".feed-action-count")).toHaveText("5");
 });
 
@@ -591,13 +585,19 @@ test("searches local shell content and opens matching results", async ({ page })
   ).toBeVisible();
 });
 
-test("preserves composer drafts locally and publishes a local cast after sign-in", async ({
+test("preserves composer drafts locally and publishes to Farcaster after write access is connected", async ({
   page
 }) => {
   const main = shellMain(page);
   const draft = "Shipping the next Hypecast draft straight from the phone shell.";
 
-  await mountApp(page);
+  await mountApp(page, {
+    write: {
+      clientId: "00b75745-test-client-id",
+      apiKey: "NEYNAR_WRITE_TEST_KEY",
+      preconnected: true
+    }
+  });
 
   await page.getByRole("button", { name: "New cast" }).click();
   await page.getByPlaceholder("What’s happening on Hypecast?").fill(draft);
@@ -606,22 +606,12 @@ test("preserves composer drafts locally and publishes a local cast after sign-in
 
   await page.getByRole("button", { name: "New cast" }).click();
   await expect(page.getByPlaceholder("What’s happening on Hypecast?")).toHaveValue(draft);
-  await expect(page.getByRole("button", { name: "Sign in to post locally" })).toBeDisabled();
-  await page.getByRole("button", { name: "Close composer" }).click();
-
-  await signInWithFarcaster(page);
-  await expect(page.getByRole("heading", { level: 2, name: "Ada Lovelace" })).toBeVisible();
-  await page.getByRole("button", { name: "Close account sheet" }).click();
-
-  await page.getByRole("button", { name: "New cast" }).click();
-  await expect(page.getByPlaceholder("What’s happening on Hypecast?")).toHaveValue(draft);
-  await expect(
-    page.getByText("Posts stay local to Hypecast for now and will not appear in Warpcast or other Farcaster clients.")
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Post in Hypecast only" }).click();
+  await expect(page.getByRole("button", { name: "Post to Farcaster" })).toBeEnabled();
+  await expect(page.getByText("Posts publish to Farcaster and should appear in other clients.")).toBeVisible();
+  await page.getByRole("button", { name: "Post to Farcaster" }).click();
 
   await expect(main.getByText(draft)).toBeVisible();
-  await expect(main.getByText("local only").first()).toBeVisible();
+  await expect(main.getByText("local only")).toHaveCount(0);
 
   await page.getByRole("button", { name: "New cast" }).click();
   await expect(page.getByPlaceholder("What’s happening on Hypecast?")).toHaveValue("");
