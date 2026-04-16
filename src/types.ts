@@ -69,6 +69,7 @@ export interface FeedCast {
   accentClass?: string;
   timestamp: number;
   contextLabel?: string;
+  replyToCastId?: string;
   text: string;
   permalink?: string;
   replies?: number;

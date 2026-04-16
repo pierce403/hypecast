@@ -67,6 +67,8 @@ interface UiState {
   searchQuery: string;
   composerDraft: string;
   localCasts: FeedCast[];
+  feedInteractions: FeedInteractionMap;
+  replyTargetCastId?: string;
 }
 
 interface FocusTarget {
@@ -83,10 +85,18 @@ interface PullToRefreshState {
   startY: number;
 }
 
+interface FeedInteractionState {
+  liked?: boolean;
+  recasted?: boolean;
+}
+
+type FeedInteractionMap = Record<string, FeedInteractionState>;
+
 const STORAGE_KEYS = {
   farcasterProfile: "hypecast:farcaster-profile",
   composerDraft: "hypecast:composer-draft",
-  localCasts: "hypecast:local-casts"
+  localCasts: "hypecast:local-casts",
+  feedInteractions: "hypecast:feed-interactions"
 } as const;
 
 const feedAggregateTab = {
@@ -213,6 +223,36 @@ function normalizeStoredMedia(value: unknown): FeedCast["media"] {
   };
 }
 
+function normalizeStoredFeedInteractions(value: unknown): FeedInteractionMap {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const interactions: FeedInteractionMap = {};
+
+  Object.entries(candidate).forEach(([castId, interaction]) => {
+    if (!interaction || typeof interaction !== "object") {
+      return;
+    }
+
+    const nextInteraction = interaction as FeedInteractionState;
+    const liked = nextInteraction.liked === true;
+    const recasted = nextInteraction.recasted === true;
+
+    if (!liked && !recasted) {
+      return;
+    }
+
+    interactions[castId] = {
+      liked,
+      recasted
+    };
+  });
+
+  return interactions;
+}
+
 function normalizeStoredCast(value: unknown): FeedCast | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -257,6 +297,7 @@ function normalizeStoredCast(value: unknown): FeedCast | null {
     accentClass: typeof candidate.accentClass === "string" ? candidate.accentClass : undefined,
     timestamp,
     contextLabel: typeof candidate.contextLabel === "string" ? candidate.contextLabel : undefined,
+    replyToCastId: typeof candidate.replyToCastId === "string" ? candidate.replyToCastId : undefined,
     text: candidate.text,
     permalink:
       typeof candidate.permalink === "string" ? sanitizeLinkUrl(candidate.permalink) : undefined,
@@ -286,6 +327,19 @@ function saveStoredLocalCasts(casts: FeedCast[]): void {
   }
 
   saveStoredJson(STORAGE_KEYS.localCasts, casts);
+}
+
+function loadStoredFeedInteractions(): FeedInteractionMap {
+  return normalizeStoredFeedInteractions(loadStoredJson<unknown>(STORAGE_KEYS.feedInteractions));
+}
+
+function saveStoredFeedInteractions(interactions: FeedInteractionMap): void {
+  if (Object.keys(interactions).length === 0) {
+    removeStoredValue(STORAGE_KEYS.feedInteractions);
+    return;
+  }
+
+  saveStoredJson(STORAGE_KEYS.feedInteractions, interactions);
 }
 
 function renderIcon(name: IconName): string {
@@ -398,7 +452,8 @@ function getInitialUiState(): UiState {
     overlay: "none",
     searchQuery: "",
     composerDraft: loadStoredComposerDraft(),
-    localCasts: loadStoredLocalCasts()
+    localCasts: loadStoredLocalCasts(),
+    feedInteractions: loadStoredFeedInteractions()
   };
 }
 
@@ -533,6 +588,40 @@ function getAllFeedCasts(state: AppState, ui: UiState): FeedCast[] {
   return [...ui.localCasts, ...(state.feed.snapshot?.casts ?? [])];
 }
 
+function getCastById(state: AppState, ui: UiState, castId: string | undefined): FeedCast | undefined {
+  if (!castId) {
+    return undefined;
+  }
+
+  return getAllFeedCasts(state, ui).find((cast) => cast.id === castId);
+}
+
+function getReplyTargetCast(state: AppState, ui: UiState): FeedCast | undefined {
+  return getCastById(state, ui, ui.replyTargetCastId);
+}
+
+function getLocalReplyCount(ui: UiState, castId: string): number {
+  return ui.localCasts.filter((cast) => cast.replyToCastId === castId).length;
+}
+
+function feedInteractionState(ui: UiState, castId: string): FeedInteractionState {
+  return ui.feedInteractions[castId] ?? {};
+}
+
+function replyCountForCast(cast: FeedCast, ui: UiState): number {
+  return Math.max(0, (cast.replies ?? 0) + getLocalReplyCount(ui, cast.id));
+}
+
+function recastCountForCast(cast: FeedCast, ui: UiState): number {
+  const recastDelta = feedInteractionState(ui, cast.id).recasted ? 1 : 0;
+  return Math.max(0, (cast.recasts ?? 0) + recastDelta);
+}
+
+function likeCountForCast(cast: FeedCast, ui: UiState): number {
+  const likeDelta = feedInteractionState(ui, cast.id).liked ? 1 : 0;
+  return Math.max(0, (cast.reactions ?? 0) + likeDelta);
+}
+
 function getFeedSource(snapshot: FeedSnapshot | undefined, sourceId: string) {
   return snapshot?.sources.find((source) => source.id === sourceId);
 }
@@ -569,7 +658,11 @@ function formatRelativeTime(timestamp: number): string {
   }).format(new Date(timestamp));
 }
 
-function publishChannel(state: AppState, ui: UiState): TimelineTab {
+function publishChannel(state: AppState, ui: UiState, replyTarget?: FeedCast): TimelineTab {
+  if (replyTarget) {
+    return replyTarget.channel;
+  }
+
   if (ui.activePane === "home" && ui.activeTimeline !== feedAggregateTab.id) {
     return ui.activeTimeline;
   }
@@ -578,7 +671,8 @@ function publishChannel(state: AppState, ui: UiState): TimelineTab {
 }
 
 function buildLocalCast(state: AppState, ui: UiState, text: string): FeedCast {
-  const channel = publishChannel(state, ui);
+  const replyTarget = getReplyTargetCast(state, ui);
+  const channel = publishChannel(state, ui, replyTarget);
   const profile = state.farcaster.profile;
   const source = getFeedSource(state.feed.snapshot, channel);
 
@@ -591,7 +685,12 @@ function buildLocalCast(state: AppState, ui: UiState, text: string): FeedCast {
     authorAvatarUrl: profile?.pfpUrl,
     accentClass: "accent-live",
     timestamp: Date.now(),
-    contextLabel: channel === feedAggregateTab.id ? undefined : `in ${source?.label ?? channel}`,
+    contextLabel: replyTarget
+      ? `replying to @${replyTarget.authorHandle}`
+      : channel === feedAggregateTab.id
+        ? undefined
+        : `in ${source?.label ?? channel}`,
+    replyToCastId: replyTarget?.id,
     text,
     permalink: undefined
   };
@@ -754,14 +853,78 @@ function renderDesktopEndRail(state: AppState, ui: UiState): string {
   `;
 }
 
-function renderFeedActions(): string {
+function renderFeedActionButton(options: {
+  action: string;
+  castId: string;
+  icon: IconName;
+  label: string;
+  active?: boolean;
+  count?: number;
+  pressed?: boolean;
+  tone?: "reply" | "recast" | "like" | "share";
+}): string {
+  const count = options.count ?? 0;
+  const activeClass = options.active ? ` is-active is-${options.tone ?? "reply"}` : "";
+  const ariaPressed =
+    typeof options.pressed === "boolean" ? `aria-pressed="${options.pressed}"` : "";
+
   return `
-    <div class="feed-actions" aria-hidden="true">
-      <span>${renderIcon("comment")}</span>
-      <span>${renderIcon("refresh")}</span>
-      <span>${renderIcon("heart")}</span>
-      <span>${renderIcon("sparkle")}</span>
-      <span>${renderIcon("share")}</span>
+    <button
+      class="feed-action-button${activeClass}"
+      type="button"
+      data-action="${escapeAttribute(options.action)}"
+      data-cast-id="${escapeAttribute(options.castId)}"
+      aria-label="${escapeAttribute(options.label)}"
+      ${ariaPressed}
+    >
+      ${renderIcon(options.icon)}
+      ${count > 0 ? `<span class="feed-action-count">${escapeHtml(count)}</span>` : ""}
+    </button>
+  `;
+}
+
+function renderFeedActions(cast: FeedCast, state: AppState, ui: UiState): string {
+  const interaction = feedInteractionState(ui, cast.id);
+  const replyTarget = getReplyTargetCast(state, ui);
+
+  return `
+    <div class="feed-actions">
+      ${renderFeedActionButton({
+        action: "reply-cast",
+        castId: cast.id,
+        icon: "comment",
+        label: `Reply to cast by ${cast.authorName}`,
+        active: replyTarget?.id === cast.id && ui.overlay === "composer",
+        count: replyCountForCast(cast, ui),
+        tone: "reply"
+      })}
+      ${renderFeedActionButton({
+        action: "recast-cast",
+        castId: cast.id,
+        icon: "refresh",
+        label: `${interaction.recasted ? "Undo recast" : "Recast"} cast by ${cast.authorName}`,
+        active: interaction.recasted === true,
+        count: recastCountForCast(cast, ui),
+        pressed: interaction.recasted === true,
+        tone: "recast"
+      })}
+      ${renderFeedActionButton({
+        action: "like-cast",
+        castId: cast.id,
+        icon: "heart",
+        label: `${interaction.liked ? "Unlike" : "Like"} cast by ${cast.authorName}`,
+        active: interaction.liked === true,
+        count: likeCountForCast(cast, ui),
+        pressed: interaction.liked === true,
+        tone: "like"
+      })}
+      ${renderFeedActionButton({
+        action: "share-cast",
+        castId: cast.id,
+        icon: "share",
+        label: `Share cast by ${cast.authorName}`,
+        tone: "share"
+      })}
     </div>
   `;
 }
@@ -851,6 +1014,41 @@ async function downloadMediaAsset(url: string, fileName: string): Promise<void> 
     }, 30_000);
   } catch {
     triggerBrowserDownload(safeUrl, fileName, true);
+  }
+}
+
+async function shareCast(cast: FeedCast): Promise<void> {
+  const shareUrl = sanitizeLinkUrl(cast.permalink) ?? sanitizeLinkUrl(cast.media?.href);
+  const shareText = `${cast.authorName}: ${cast.text}`;
+
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: cast.authorName,
+        text: shareText,
+        url: shareUrl
+      });
+      return;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+    }
+  }
+
+  const fallbackPayload = shareUrl ? `${shareText}\n${shareUrl}` : shareText;
+
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(fallbackPayload);
+      return;
+    } catch {
+      // Fall through to the window-open fallback.
+    }
+  }
+
+  if (shareUrl) {
+    window.open(shareUrl, "_blank", "noopener,noreferrer");
   }
 }
 
@@ -969,7 +1167,7 @@ function renderFeedMedia(media: FeedCast["media"]): string {
   return "";
 }
 
-function renderFeedCast(cast: FeedCast): string {
+function renderFeedCast(cast: FeedCast, state: AppState, ui: UiState): string {
   const safeAvatarUrl = sanitizeImageUrl(cast.authorAvatarUrl);
   const safePermalink = sanitizeLinkUrl(cast.permalink);
 
@@ -1001,7 +1199,7 @@ function renderFeedCast(cast: FeedCast): string {
             : `<span class="feed-menu" aria-hidden="true">${renderIcon("more")}</span>`
         }
       </div>
-      ${renderFeedActions()}
+      ${renderFeedActions(cast, state, ui)}
     </article>
   `;
 }
@@ -1153,7 +1351,7 @@ function renderHomePane(state: AppState, ui: UiState): string {
   } else if (filteredCasts.length === 0) {
     cards.push(renderEmptyTimeline(ui.activeTimeline, state.feed.snapshot));
   } else {
-    cards.push(...filteredCasts.map(renderFeedCast));
+    cards.push(...filteredCasts.map((cast) => renderFeedCast(cast, state, ui)));
   }
 
   return `
@@ -1592,19 +1790,30 @@ function renderProfileOverlay(state: AppState): string {
 function renderComposerOverlay(state: AppState, ui: UiState): string {
   const draftLength = ui.composerDraft.trim().length;
   const canPublish = state.farcaster.status === "connected" && draftLength > 0;
+  const replyTarget = getReplyTargetCast(state, ui);
 
   return `
     <div class="overlay-backdrop">
       <section class="overlay-sheet">
         <div class="sheet-head">
           <div>
-            <p class="eyebrow-label">new cast</p>
-            <h2>Composer placement is in</h2>
+            <p class="eyebrow-label">${replyTarget ? "reply" : "new cast"}</p>
+            <h2>${replyTarget ? `Reply to @${escapeHtml(replyTarget.authorHandle)}` : "Composer placement is in"}</h2>
           </div>
           <button class="icon-button" type="button" data-action="close-overlay" aria-label="Close composer">
             ${renderIcon("close")}
           </button>
         </div>
+        ${
+          replyTarget
+            ? `
+              <div class="reply-target-card">
+                <strong>@${escapeHtml(replyTarget.authorHandle)}</strong>
+                <p class="support-copy">${escapeHtml(summarizeText(replyTarget.text, 140))}</p>
+              </div>
+            `
+            : ""
+        }
         <div class="composer-shell">
           <div class="composer-head">
             <div class="sheet-avatar-wrap">
@@ -1615,7 +1824,9 @@ function renderComposerOverlay(state: AppState, ui: UiState): string {
               <p class="support-copy">
                 Drafts save locally on this device. ${
                   state.farcaster.status === "connected"
-                    ? "Publishing adds a local cast to the feed shell."
+                    ? replyTarget
+                      ? "Publishing adds a local reply to the feed shell and updates the reply count."
+                      : "Publishing adds a local cast to the feed shell."
                     : "Sign in with Farcaster when you want to publish."
                 }
               </p>
@@ -1631,6 +1842,9 @@ function renderComposerOverlay(state: AppState, ui: UiState): string {
           </div>
         </div>
         <div class="action-grid">
+          <button class="secondary-button" type="button" data-action="clear-reply-target" ${
+            replyTarget ? "" : "disabled"
+          }>Cancel reply</button>
           <button class="secondary-button" type="button" data-action="clear-draft" ${
             ui.composerDraft ? "" : "disabled"
           }>Clear draft</button>
@@ -1832,6 +2046,10 @@ export function createApp(root: HTMLDivElement): void {
     render();
   };
 
+  const persistFeedInteractions = () => {
+    saveStoredFeedInteractions(ui.feedInteractions);
+  };
+
   const persistComposerDraft = (draft: string) => {
     ui.composerDraft = draft;
     saveStoredComposerDraft(draft);
@@ -1839,6 +2057,26 @@ export function createApp(root: HTMLDivElement): void {
 
   const clearComposerDraft = () => {
     persistComposerDraft("");
+  };
+
+  const clearReplyTarget = () => {
+    ui.replyTargetCastId = undefined;
+  };
+
+  const toggleFeedInteraction = (castId: string, key: keyof FeedInteractionState) => {
+    const nextInteraction = {
+      ...feedInteractionState(ui, castId),
+      [key]: !feedInteractionState(ui, castId)[key]
+    };
+
+    if (!nextInteraction.liked && !nextInteraction.recasted) {
+      delete ui.feedInteractions[castId];
+    } else {
+      ui.feedInteractions[castId] = nextInteraction;
+    }
+
+    persistFeedInteractions();
+    render();
   };
 
   const refreshFeedSnapshot = async () => {
@@ -1913,6 +2151,7 @@ export function createApp(root: HTMLDivElement): void {
     ui.localCasts = [nextCast, ...ui.localCasts];
     saveStoredLocalCasts(ui.localCasts);
     clearComposerDraft();
+    clearReplyTarget();
     ui.activePane = "home";
     ui.activeTimeline = nextCast.channel;
     ui.overlay = "none";
@@ -2192,6 +2431,7 @@ export function createApp(root: HTMLDivElement): void {
 
     const nav = target.dataset.nav as NavPane | undefined;
     const timeline = target.dataset.timeline as TimelineTab | undefined;
+    const castId = target.dataset.castId;
     const downloadUrl = target.dataset.downloadUrl;
     const action = target.dataset.action;
 
@@ -2238,6 +2478,7 @@ export function createApp(root: HTMLDivElement): void {
         );
         break;
       case "compose":
+        clearReplyTarget();
         ui.overlay = ui.overlay === "composer" ? "none" : "composer";
         render(
           ui.overlay === "composer"
@@ -2248,6 +2489,54 @@ export function createApp(root: HTMLDivElement): void {
               }
             : undefined
         );
+        break;
+      case "reply-cast":
+        if (!castId) {
+          break;
+        }
+
+        ui.replyTargetCastId = castId;
+        ui.overlay = "composer";
+        render({
+          field: "composer",
+          start: ui.composerDraft.length,
+          end: ui.composerDraft.length
+        });
+        break;
+      case "recast-cast":
+        if (!castId) {
+          break;
+        }
+
+        toggleFeedInteraction(castId, "recasted");
+        break;
+      case "like-cast":
+        if (!castId) {
+          break;
+        }
+
+        toggleFeedInteraction(castId, "liked");
+        break;
+      case "share-cast":
+        if (!castId) {
+          break;
+        }
+
+        {
+          const cast = getCastById(state, ui, castId);
+
+          if (cast) {
+            void shareCast(cast);
+          }
+        }
+        break;
+      case "clear-reply-target":
+        clearReplyTarget();
+        render({
+          field: "composer",
+          start: ui.composerDraft.length,
+          end: ui.composerDraft.length
+        });
         break;
       case "clear-draft":
         clearComposerDraft();

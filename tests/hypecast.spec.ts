@@ -120,6 +120,40 @@ test("renders clickable media cards, plain attachments, and download controls", 
   await expect(main.getByRole("button", { name: "Download video" })).toBeVisible();
 });
 
+test("reply, recast, and like buttons update cast state", async ({ page }) => {
+  const main = shellMain(page);
+  const replyText = "Shipping a real reply from the Hypecast shell.";
+  const likeButton = main.locator('[data-action="like-cast"][data-cast-id="cast-farcaster-snaps"]');
+  const recastButton = main.locator('[data-action="recast-cast"][data-cast-id="cast-farcaster-snaps"]');
+  const replyButton = main.locator('[data-action="reply-cast"][data-cast-id="cast-farcaster-snaps"]');
+
+  await mountApp(page);
+
+  await page.getByRole("tab", { name: "farcaster" }).click();
+  await expect(likeButton.locator(".feed-action-count")).toHaveText("29");
+  await expect(recastButton.locator(".feed-action-count")).toHaveText("12");
+  await expect(replyButton.locator(".feed-action-count")).toHaveText("4");
+
+  await likeButton.click();
+  await expect(likeButton).toHaveAttribute("aria-pressed", "true");
+  await expect(likeButton.locator(".feed-action-count")).toHaveText("30");
+
+  await recastButton.click();
+  await expect(recastButton).toHaveAttribute("aria-pressed", "true");
+  await expect(recastButton.locator(".feed-action-count")).toHaveText("13");
+
+  await signInWithFarcaster(page);
+  await page.getByRole("button", { name: "Close account sheet" }).click();
+
+  await replyButton.click();
+  await expect(page.getByRole("heading", { level: 2, name: "Reply to @farcaster" })).toBeVisible();
+  await page.getByPlaceholder("What’s happening on Hypecast?").fill(replyText);
+  await page.getByRole("button", { name: "Publish cast" }).click();
+
+  await expect(main.getByText(replyText)).toBeVisible();
+  await expect(replyButton.locator(".feed-action-count")).toHaveText("5");
+});
+
 test("refuses to render unsafe remote feed URLs", async ({ page }) => {
   const main = shellMain(page);
 

@@ -637,16 +637,57 @@ code {
 
 .feed-actions {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   margin-top: 18px;
   color: rgba(246, 246, 248, 0.38);
 }
 
-.feed-actions span {
+.feed-action-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  transition:
+    color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease;
+}
+
+.feed-action-button:hover {
+  transform: translateY(-1px);
+}
+
+.feed-action-button .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.feed-action-count {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.feed-action-button.is-active {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.feed-action-button.is-reply {
+  color: rgba(125, 136, 255, 0.88);
+}
+
+.feed-action-button.is-recast {
+  color: rgba(35, 209, 179, 0.88);
+}
+
+.feed-action-button.is-like {
+  color: rgba(255, 122, 69, 0.92);
 }
 
 .desktop-panel {
@@ -896,6 +937,19 @@ code {
 .notice-row strong {
   display: block;
   margin-bottom: 4px;
+}
+
+.reply-target-card {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.reply-target-card strong {
+  display: block;
+  margin-bottom: 6px;
 }
 
 .notice-dot {

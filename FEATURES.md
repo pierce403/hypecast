@@ -28,6 +28,7 @@
   - Link preview cards are clickable, while direct image/video attachments expose explicit download controls
   - Plain image/video attachments can render without redundant title/source captions
   - Pulling down from the top of the feed triggers a fresh snapshot request without moving the pinned bottom rail
+  - Reply, recast, and like controls now update local cast state directly inside the shell
 - **Test Criteria**:
   - [x] Logged-in and signed-out states both render inside the same mobile shell
   - [x] Avatar, search, bottom nav, and floating compose button stay visible on mobile
@@ -37,6 +38,7 @@
   - [x] Wide desktop viewports keep the shell centered and framed cleanly
   - [x] Link previews are actionable and image/video cards expose media downloads
   - [x] Pulling down at scroll-top refreshes the feed snapshot
+  - [x] Reply, recast, and like buttons mutate local shell state and counts
 
 ### Client Security Model
 - **Stability**: in-progress
@@ -108,10 +110,12 @@
   - Composer opens as an in-app sheet from the floating action button
   - Draft state survives accidental sheet closes and page reloads on the same device
   - Signed-in publishing posts a local cast into the feed using the authenticated Farcaster profile
+  - Reply actions route into the composer and publish local replies that increment the parent cast's reply count
 - **Test Criteria**:
   - [x] Compose button placement is present in the shell
   - [x] Draft text can be entered and preserved locally
   - [x] Authenticated users can publish a cast successfully
+  - [x] Authenticated users can publish a reply from a feed action successfully
 
 ### Notifications And Chat Delivery
 - **Stability**: planned

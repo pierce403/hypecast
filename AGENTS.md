@@ -86,6 +86,7 @@ Notes:
 - Keep the signed-in experience inside the phone-shell UI in `src/app.ts` / `src/styles.css`. Wallet, Farcaster, XMTP, and install actions should stay reachable from panes or overlays within that shell instead of reintroducing a separate dashboard.
 - On desktop, keep the interactive phone shell centered and treat any surrounding rails as supporting context only. Do not move primary controls or flows out of the shell.
 - Search, draft composer state, locally published casts, and the persisted Farcaster profile currently live in `src/app.ts` via `localStorage`. If you change those flows, update the storage behavior and the E2E coverage together.
+- Local reply targets and feed interaction toggles (`like` / `recast`) are also managed in `src/app.ts`. If you touch feed actions, keep their local persistence and the action-count tests in sync.
 - Keep the bottom nav outside the `.shell-content` scroll container. The intended behavior is a pinned shell footer while only the feed/pane content scrolls.
 - Keep the Home timeline free of synthetic placeholder cards. Account/status controls belong in panes or overlays; the feed itself should start with real snapshot or local casts.
 - Any untrusted remote URL that reaches `href` or `src` should go through `src/services/security.ts` first. Do not interpolate remote URLs directly into markup.
@@ -146,6 +147,7 @@ Notes:
 - Neynar image embeds often arrive as `metadata.content_type: image/*` plus `metadata.image`, even when the URL has no file extension. The media normalizer must treat those as images and should rank direct image/OG/frame previews above embedded-cast fallbacks.
 - Media downloads are handled client-side in `src/app.ts` with a fetch-to-blob attempt and a new-tab fallback. If you add new downloadable media surfaces, keep them behind sanitized URLs and `data-download-url` buttons.
 - Pull-to-refresh now lives on `.shell-content` in `src/app.ts` and only arms when Home is at scroll-top with no overlay open. Keep the gesture tied to the feed scroller so the bottom nav stays fixed.
+- Feed action counts are currently local-shell behavior: replies are derived from persisted local reply casts, and like/recast toggles are stored in `localStorage`. Preserve that relationship unless the product moves to a real write API.
 - Playwright now runs against both `mobile-chromium` and `desktop-chromium`. If layout changes are viewport-specific, keep assertions for both form factors green.
 
 ## Rapport & Reflection
