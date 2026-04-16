@@ -522,6 +522,21 @@ code {
   margin-bottom: 0;
 }
 
+.composer-note {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.composer-note-local {
+  border-color: rgba(255, 167, 82, 0.28);
+  background:
+    linear-gradient(180deg, rgba(255, 167, 82, 0.1), transparent 120px),
+    rgba(255, 255, 255, 0.03);
+}
+
 .feed-config-card {
   margin-top: 16px;
   padding: 16px;
@@ -920,6 +935,12 @@ code {
     transform 180ms ease,
     background 180ms ease,
     border-color 180ms ease;
+}
+
+.context-pill-local {
+  color: #ffbb84;
+  border-color: rgba(255, 167, 82, 0.28);
+  background: rgba(255, 167, 82, 0.12);
 }
 
 .media-action-button:hover {

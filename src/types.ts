@@ -76,6 +76,7 @@ export interface FeedCast {
   recasts?: number;
   reactions?: number;
   media?: FeedMedia;
+  localOnly?: boolean;
 }
 
 export interface FeedLoadOptions {

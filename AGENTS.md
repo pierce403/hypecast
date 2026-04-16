@@ -152,6 +152,7 @@ Notes:
 - Media downloads are handled client-side in `src/app.ts` with a fetch-to-blob attempt and a new-tab fallback. If you add new downloadable media surfaces, keep them behind sanitized URLs and `data-download-url` buttons.
 - Pull-to-refresh now lives on `.shell-content` in `src/app.ts` and only arms when Home is at scroll-top with no overlay open. Keep the gesture tied to the feed scroller so the bottom nav stays fixed.
 - Feed action counts are currently local-shell behavior: replies are derived from persisted local reply casts, and like/recast toggles are stored in `localStorage`. Preserve that relationship unless the product moves to a real write API.
+- Hypecast still does not have a signer-backed Farcaster write path. Composer/reply actions must stay explicitly labeled as local-only until a real network publish flow exists, otherwise users will assume the post should appear in Warpcast.
 - Playwright now runs against both `mobile-chromium` and `desktop-chromium`. If layout changes are viewport-specific, keep assertions for both form factors green.
 
 ## Rapport & Reflection

@@ -312,7 +312,8 @@ function normalizeStoredCast(value: unknown): FeedCast | null {
     replies: typeof candidate.replies === "number" ? candidate.replies : undefined,
     recasts: typeof candidate.recasts === "number" ? candidate.recasts : undefined,
     reactions: typeof candidate.reactions === "number" ? candidate.reactions : undefined,
-    media: normalizeStoredMedia(candidate.media)
+    media: normalizeStoredMedia(candidate.media),
+    localOnly: candidate.localOnly === true
   };
 }
 
@@ -725,8 +726,41 @@ function buildLocalCast(state: AppState, ui: UiState, text: string): FeedCast {
         : `in ${source?.label ?? channel}`,
     replyToCastId: replyTarget?.id,
     text,
-    permalink: undefined
+    permalink: undefined,
+    localOnly: true
   };
+}
+
+function hasRealFarcasterWriteConfigured(): boolean {
+  return false;
+}
+
+function localPublishButtonLabel(state: AppState, ui: UiState): string {
+  if (state.farcaster.status !== "connected") {
+    return "Sign in to post locally";
+  }
+
+  return ui.replyTargetCastId ? "Reply in Hypecast only" : "Post in Hypecast only";
+}
+
+function localPublishSupportCopy(state: AppState, ui: UiState): string {
+  if (hasRealFarcasterWriteConfigured()) {
+    return ui.replyTargetCastId
+      ? "Replies publish to Farcaster and should appear in other clients."
+      : "Posts publish to Farcaster and should appear in other clients.";
+  }
+
+  return ui.replyTargetCastId
+    ? "Replies stay local to Hypecast for now and will not appear in Warpcast or other Farcaster clients."
+    : "Posts stay local to Hypecast for now and will not appear in Warpcast or other Farcaster clients.";
+}
+
+function renderLocalOnlyPill(cast: FeedCast): string {
+  if (!cast.localOnly) {
+    return "";
+  }
+
+  return `<span class="context-pill context-pill-local">local only</span>`;
 }
 
 function renderAvatar(
@@ -1238,6 +1272,7 @@ function renderFeedCast(cast: FeedCast, state: AppState, ui: UiState): string {
           <div class="author-row">
             <strong>${escapeHtml(cast.authorName)}</strong>
             <span class="author-meta">@${escapeHtml(cast.authorHandle)}</span>
+            ${renderLocalOnlyPill(cast)}
             ${cast.contextLabel ? `<span class="context-pill">${escapeHtml(cast.contextLabel)}</span>` : ""}
             <span class="author-meta">${escapeHtml(formatRelativeTime(cast.timestamp))}</span>
           </div>
@@ -1909,6 +1944,8 @@ function renderComposerOverlay(state: AppState, ui: UiState): string {
   const draftLength = ui.composerDraft.trim().length;
   const canPublish = state.farcaster.status === "connected" && draftLength > 0;
   const replyTarget = getReplyTargetCast(state, ui);
+  const publishLabel = localPublishButtonLabel(state, ui);
+  const publishSupport = localPublishSupportCopy(state, ui);
 
   return `
     <div class="overlay-backdrop">
@@ -1943,12 +1980,16 @@ function renderComposerOverlay(state: AppState, ui: UiState): string {
                 Drafts save locally on this device. ${
                   state.farcaster.status === "connected"
                     ? replyTarget
-                      ? "Publishing adds a local reply to the feed shell and updates the reply count."
-                      : "Publishing adds a local cast to the feed shell."
-                    : "Sign in with Farcaster when you want to publish."
+                      ? "Posting adds a local reply to the Hypecast feed and updates the reply count."
+                      : "Posting adds a local cast to the Hypecast feed."
+                    : "Sign in with Farcaster when you want to post locally in Hypecast."
                 }
               </p>
             </div>
+          </div>
+          <div class="composer-note composer-note-local">
+            <p class="eyebrow-label">local only</p>
+            <p class="support-copy">${escapeHtml(publishSupport)}</p>
           </div>
           <textarea
             data-input="composer"
@@ -1969,7 +2010,7 @@ function renderComposerOverlay(state: AppState, ui: UiState): string {
           <button class="primary-button" type="button" data-action="publish-cast" ${
             canPublish ? "" : "disabled"
           }>
-            ${state.farcaster.status === "connected" ? "Publish cast" : "Sign in to publish"}
+            ${escapeHtml(publishLabel)}
           </button>
         </div>
       </section>

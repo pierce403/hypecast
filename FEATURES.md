@@ -115,11 +115,13 @@
   - Draft state survives accidental sheet closes and page reloads on the same device
   - Signed-in publishing posts a local cast into the feed using the authenticated Farcaster profile
   - Reply actions route into the composer and publish local replies that increment the parent cast's reply count
+  - The composer and resulting cast cards explicitly mark those posts as local-only so they are not mistaken for Farcaster network writes
 - **Test Criteria**:
   - [x] Compose button placement is present in the shell
   - [x] Draft text can be entered and preserved locally
   - [x] Authenticated users can publish a cast successfully
   - [x] Authenticated users can publish a reply from a feed action successfully
+  - [x] Local-only posting is clearly labeled before and after a cast is added to the Hypecast feed
 
 ### Notifications And Chat Delivery
 - **Stability**: planned
