@@ -7,6 +7,35 @@ import {
   primaryNav,
   shortAddress
 } from "./test-helpers";
+import type { FeedSnapshot } from "../src/types";
+
+const personalizedFeedSnapshot: FeedSnapshot = {
+  generatedAt: "2026-04-16T04:00:00.000Z",
+  mode: "following",
+  provider: "neynar",
+  viewerFid: 777,
+  sources: [],
+  casts: [
+    {
+      id: "personal-1",
+      channel: "following",
+      authorName: "Real Follow",
+      authorHandle: "realfollow",
+      authorInitial: "R",
+      authorAvatarUrl: "https://example.com/realfollow.png",
+      accentClass: "accent-live",
+      timestamp: 1776310800000,
+      contextLabel: "in builders",
+      text: "A real following-feed cast just landed in Hypecast.",
+      media: {
+        kind: "link",
+        eyebrow: "example.com",
+        title: "Real personalized preview",
+        description: "Pulled from the signed-in user's following feed."
+      }
+    }
+  ]
+};
 
 async function signInWithFarcaster(page: Page) {
   await page.getByRole("button", { name: "Open account", exact: true }).click();
@@ -53,6 +82,25 @@ test("renders the mobile shell, filters snapshot tabs, and opens overlays", asyn
   await expect(
     page.getByRole("heading", { level: 2, name: "Composer placement is in" })
   ).toHaveCount(0);
+});
+
+test("loads a personalized following feed when a Neynar key is configured", async ({ page }) => {
+  await mountApp(page, {
+    feed: {
+      personalizedSnapshot: personalizedFeedSnapshot
+    }
+  });
+
+  await signInWithFarcaster(page);
+  await page.locator('[data-field="neynar-api-key"]').fill("test-neynar-key");
+  await page.getByRole("button", { name: "Save key" }).click();
+
+  await expect(page.getByText("Following feed for fid 777 via Neynar.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh following feed" })).toBeEnabled();
+
+  await page.getByRole("button", { name: "Close account sheet" }).click();
+  await expect(page.getByRole("tab")).toHaveCount(1);
+  await expect(page.getByText("A real following-feed cast just landed in Hypecast.")).toBeVisible();
 });
 
 test("keeps the bottom nav pinned while the feed scrolls", async ({ page }) => {

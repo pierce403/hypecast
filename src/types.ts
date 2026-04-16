@@ -74,10 +74,18 @@ export interface FeedCast {
   media?: FeedMedia;
 }
 
+export interface FeedLoadOptions {
+  fid?: number;
+  neynarApiKey?: string;
+}
+
 export interface FeedSnapshot {
   generatedAt: string;
   sources: FeedSource[];
   casts: FeedCast[];
+  mode?: "public" | "following";
+  provider?: "public-ssr" | "bundled" | "neynar";
+  viewerFid?: number;
 }
 
 export interface FeedState {

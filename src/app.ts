@@ -4,7 +4,12 @@ import {
   createFarcasterChannel,
   waitForFarcasterProfile
 } from "./services/farcaster";
-import { loadFeedSnapshot } from "./services/feed";
+import {
+  clearStoredNeynarApiKey,
+  loadFeedSnapshot,
+  loadStoredNeynarApiKey,
+  saveStoredNeynarApiKey
+} from "./services/feed";
 import { connectWallet, shortAddress, type WalletSession } from "./services/wallet";
 import { connectXmtp } from "./services/xmtp";
 import { getHypecastTestApi } from "./test-support";
@@ -425,6 +430,22 @@ function describeXmtp(state: XmtpState): string {
   return "Messaging has not been initialized yet.";
 }
 
+function describeFeed(state: AppState["feed"]): string {
+  if (state.snapshot?.mode === "following" && typeof state.snapshot.viewerFid === "number") {
+    return `Following feed for fid ${state.snapshot.viewerFid} via Neynar.`;
+  }
+
+  if (state.status === "loading") {
+    return "Loading the public fallback feed.";
+  }
+
+  if (state.status === "error") {
+    return state.error ?? "The feed could not be loaded.";
+  }
+
+  return "Public fallback feed sourced from recent Farcaster casts.";
+}
+
 function paneTitle(activePane: NavPane): string {
   switch (activePane) {
     case "apps":
@@ -601,6 +622,7 @@ function renderStatusCapsules(state: AppState): string {
   return `
     <div class="status-capsules">
       <span class="status-capsule ${stateTone(state.farcaster.status)}">Farcaster ${escapeHtml(stateLabel(state.farcaster.status))}</span>
+      <span class="status-capsule ${state.feed.snapshot?.mode === "following" ? "is-live" : "is-idle"}">Feed ${escapeHtml(state.feed.snapshot?.mode === "following" ? "following" : "public")}</span>
       <span class="status-capsule ${stateTone(state.wallet.status)}">Wallet ${escapeHtml(stateLabel(state.wallet.status))}</span>
       <span class="status-capsule ${stateTone(state.xmtp.status)}">XMTP ${escapeHtml(stateLabel(state.xmtp.status))}</span>
     </div>
@@ -908,6 +930,10 @@ function renderAppsPane(state: AppState): string {
             <span>Feed snapshot</span>
             <strong>${escapeHtml(snapshotStamp)}</strong>
           </div>
+          <div class="mini-item">
+            <span>Feed mode</span>
+            <strong>${escapeHtml(state.feed.snapshot?.mode === "following" ? "Personal following" : "Public fallback")}</strong>
+          </div>
         </div>
       </article>
     </section>
@@ -980,6 +1006,7 @@ function renderNotificationsPane(state: AppState): string {
         <h2>System notifications</h2>
         <div class="notice-list">
           ${renderNotificationRow("Farcaster", describeFarcaster(state.farcaster), stateTone(state.farcaster.status))}
+          ${renderNotificationRow("Feed", describeFeed(state.feed), state.feed.snapshot?.mode === "following" ? "is-live" : stateTone(state.feed.status))}
           ${renderNotificationRow("Wallet", describeWallet(state.wallet), stateTone(state.wallet.status))}
           ${renderNotificationRow("XMTP", describeXmtp(state.xmtp), stateTone(state.xmtp.status))}
           ${renderNotificationRow("Install", installDetail, installTone)}
@@ -1145,6 +1172,13 @@ function renderFarcasterRelayCard(state: AppState): string {
 
 function renderProfileOverlay(state: AppState): string {
   const profile = state.farcaster.profile;
+  const neynarApiKey = loadStoredNeynarApiKey();
+  const personalizedFeedReady = Boolean(profile?.fid && neynarApiKey);
+  const feedHelperText = personalizedFeedReady
+    ? "Saved in this browser. Refresh the feed to load your real following timeline."
+    : neynarApiKey
+      ? "Key saved. Sign in with Farcaster to load your following feed."
+      : "Paste a Neynar API key to load your real following feed in this browser.";
 
   return `
     <div class="overlay-backdrop">
@@ -1183,6 +1217,38 @@ function renderProfileOverlay(state: AppState): string {
           <div class="mini-item">
             <span>XMTP</span>
             <strong>${escapeHtml(describeXmtp(state.xmtp))}</strong>
+          </div>
+          <div class="mini-item">
+            <span>Feed</span>
+            <strong>${escapeHtml(describeFeed(state.feed))}</strong>
+          </div>
+        </div>
+        <div class="feed-config-card">
+          <p class="eyebrow-label">following feed</p>
+          <h3>Load your real Farcaster feed</h3>
+          <p class="support-copy">${escapeHtml(feedHelperText)}</p>
+          <label class="secret-field">
+            <span class="sr-only">Neynar API key</span>
+            <input
+              type="password"
+              data-field="neynar-api-key"
+              value="${escapeAttribute(neynarApiKey)}"
+              placeholder="Paste Neynar API key"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+            />
+          </label>
+          <div class="action-grid">
+            <button class="secondary-button" type="button" data-action="save-feed-key">
+              ${neynarApiKey ? "Update key" : "Save key"}
+            </button>
+            <button class="secondary-button" type="button" data-action="clear-feed-key" ${neynarApiKey ? "" : "disabled"}>
+              Clear key
+            </button>
+            <button class="primary-button" type="button" data-action="refresh-feed" ${personalizedFeedReady ? "" : "disabled"}>
+              Refresh following feed
+            </button>
           </div>
         </div>
         <div class="action-grid">
@@ -1394,6 +1460,9 @@ export function createApp(root: HTMLDivElement): void {
   };
 
   const refreshFeedSnapshot = async () => {
+    const neynarApiKey = loadStoredNeynarApiKey();
+    const fid = state.farcaster.profile?.fid;
+
     setPartialState({
       feed: {
         status: "loading",
@@ -1402,7 +1471,10 @@ export function createApp(root: HTMLDivElement): void {
     });
 
     try {
-      const snapshot = await loadFeedSnapshot();
+      const snapshot = await loadFeedSnapshot({
+        fid,
+        neynarApiKey
+      });
       const nextTabs = new Set(getTimelineTabs(snapshot).map((tab) => tab.id));
 
       if (!nextTabs.has(ui.activeTimeline)) {
@@ -1545,6 +1617,7 @@ export function createApp(root: HTMLDivElement): void {
         }
       });
       saveStoredProfile(profile);
+      void refreshFeedSnapshot();
     } catch (error) {
       setPartialState({
         farcaster: {
@@ -1665,6 +1738,26 @@ export function createApp(root: HTMLDivElement): void {
         break;
       case "publish-cast":
         handlePublishCast();
+        break;
+      case "save-feed-key": {
+        const input = root.querySelector<HTMLInputElement>('[data-field="neynar-api-key"]');
+        const nextKey = input?.value ?? "";
+
+        if (nextKey.trim()) {
+          saveStoredNeynarApiKey(nextKey);
+        } else {
+          clearStoredNeynarApiKey();
+        }
+
+        void refreshFeedSnapshot();
+        break;
+      }
+      case "clear-feed-key":
+        clearStoredNeynarApiKey();
+        void refreshFeedSnapshot();
+        break;
+      case "refresh-feed":
+        void refreshFeedSnapshot();
         break;
       case "install":
         void handleInstall();

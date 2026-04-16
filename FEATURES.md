@@ -16,29 +16,33 @@
 
 ### Logged-In Mobile Feed Shell
 - **Stability**: stable
-- **Description**: The signed-in app surface mirrors a Farcaster-like mobile layout with avatar, top search affordance, fixed bottom navigation, floating composer placement, and a snapshot-backed real feed.
+- **Description**: The signed-in app surface mirrors a Farcaster-like mobile layout with avatar, top search affordance, fixed bottom navigation, floating composer placement, and a real public-or-personalized feed.
 - **Properties**:
   - Home view renders a phone-first feed shell instead of a launchpad dashboard
   - Bottom navigation exposes home, apps, wallet, notifications, and chat surfaces and remains pinned while the feed scrolls
-  - Home loads `/farcaster-feed.json`, a same-origin snapshot generated from public Farcaster profile pages
+  - Home falls back to `/farcaster-feed.json`, a same-origin snapshot generated from public Farcaster profile pages
+  - Signed-in users can switch Home to a real following feed by saving a Neynar API key in the account sheet
   - Search and composer affordances open in-app overlays that reserve the intended interaction pattern
 - **Test Criteria**:
   - [x] Logged-in and signed-out states both render inside the same mobile shell
   - [x] Avatar, search, bottom nav, and floating compose button stay visible on mobile
   - [x] The bottom navigation stays pinned while the feed content scrolls
   - [x] Real Farcaster snapshot data hydrates the feed instead of local scaffold content
+  - [x] Signed-in users can load a personalized following feed from their own `fid`
 
 ### Farcaster Sign-In And Profile Binding
 - **Stability**: in-progress
-- **Description**: Users can authenticate through the Farcaster relay flow, bind profile metadata into the client shell, and restore that profile after reloads.
+- **Description**: Users can authenticate through the Farcaster relay flow, bind profile metadata into the client shell, restore that profile after reloads, and use the authenticated `fid` to unlock personalized feed loading.
 - **Properties**:
   - Relay channels are created through `@farcaster/auth-client`
   - QR and deep-link handoff support mobile completion
   - Verified profile metadata populates the signed-in shell after successful auth
+  - The saved `fid` is passed to the following-feed loader when a Neynar API key is configured
 - **Test Criteria**:
   - [x] Sign-in channel creation succeeds with a reachable app origin
   - [x] QR code and deep link are rendered while the session is pending
   - [x] Session state persists across reloads
+  - [x] Saved profile state can drive a personalized following feed request on reload
 
 ### Injected Wallet Connection
 - **Stability**: in-progress

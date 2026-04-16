@@ -59,7 +59,7 @@ Notes:
 - `src/main.ts`: app bootstrap and PWA service worker registration
 - `src/app.ts`: top-level DOM rendering and interaction/state wiring
 - `src/config.ts`: runtime config parsing for RPC and XMTP environment
-- `src/services/feed.ts`: loads the committed Farcaster feed snapshot from same-origin app assets
+- `src/services/feed.ts`: loads the public fallback feed plus the personalized Neynar following feed when a signed-in `fid` and stored API key are available
 - `src/test-support.ts`: browser-only test seam for Playwright mocks of standalone mode, wallet, Farcaster, and XMTP
 - `src/services/wallet.ts`: injected EVM wallet connection
 - `src/services/farcaster.ts`: Farcaster auth channel creation, QR generation, and verification
@@ -105,6 +105,7 @@ Notes:
 - The browser app cannot fetch `https://ssr.farcaster.xyz/*` directly because of cross-origin restrictions. If the home feed needs fresher real data, update the committed snapshot with `npm run sync:feed` instead of wiring runtime fetches to SSR pages.
 - If the bottom nav drifts below the fold again, inspect `html`, `body`, `#app`, `.app-shell`, and `.phone-shell` first. The shell depends on viewport-locked `100dvh` sizing plus `body { overflow: hidden; }`.
 - Keep `.bottom-nav` sticky with `bottom: 0` and `margin-top: auto` so it stays anchored to the phone shell edge while only `.shell-content` scrolls.
+- The personalized following feed currently uses Neynar from the browser with a user-supplied API key stored in `localStorage`. That is the practical Pages-compatible path today, but it is not the long-term secret-management model.
 
 ## Deployment Notes
 
@@ -131,6 +132,7 @@ Notes:
 - The profile/account overlay now owns the Farcaster QR and deep-link handoff. If you change the auth flow, keep that overlay scrollable on mobile so the close button and QR stay reachable.
 - If you learn a new repo-specific command, deployment quirk, or SDK hazard, add it here before finishing the task.
 - Runtime feed loading now attempts live Farcaster SSR profile data via CORS-friendly mirrors (`allorigins`, `r.jina.ai`) before falling back to the committed snapshot; successful responses are cached in `localStorage` under `hypecast:feed-snapshot` for a short TTL.
+- Personalized feed loading uses the signed-in Farcaster `fid` plus `hypecast:neynar-api-key` from `localStorage` to request Neynar's following feed directly from the browser. If that request fails, the app falls back to the last matching cached personalized snapshot when available.
 
 ## Rapport & Reflection
 

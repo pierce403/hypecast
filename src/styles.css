@@ -443,6 +443,43 @@ code {
   margin-bottom: 0;
 }
 
+.feed-config-card {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.feed-config-card h3 {
+  margin: 8px 0 0;
+  font-size: 1.1rem;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+}
+
+.secret-field {
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+  margin-top: 14px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.secret-field input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.secret-field input:focus {
+  outline: none;
+}
+
 .sheet-qr-card {
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr);

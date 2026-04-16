@@ -1,6 +1,6 @@
 import type { Address } from "viem";
 
-import type { FarcasterProfile, FeedSnapshot } from "./types";
+import type { FarcasterProfile, FeedLoadOptions, FeedSnapshot } from "./types";
 
 export interface HypecastTestWalletSession {
   address: Address;
@@ -22,7 +22,7 @@ export interface HypecastTestXmtpSession {
 
 export interface HypecastTestApi {
   isStandalone?: boolean;
-  loadFeedSnapshot?: () => Promise<FeedSnapshot>;
+  loadFeedSnapshot?: (options?: FeedLoadOptions) => Promise<FeedSnapshot>;
   connectWallet?: () => Promise<HypecastTestWalletSession>;
   createFarcasterChannel?: (options: {
     domain: string;

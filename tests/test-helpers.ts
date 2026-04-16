@@ -45,6 +45,8 @@ interface XmtpMockOptions {
 interface FeedMockOptions {
   delayMs?: number;
   error?: string;
+  personalizedError?: string;
+  personalizedSnapshot?: FeedSnapshot;
   snapshot?: FeedSnapshot;
 }
 
@@ -100,9 +102,23 @@ export async function mountApp(page: Page, options: HypecastMockOptions = {}): P
 
     window.__HYPECAST_TEST_API__ = {
       isStandalone: input.isStandalone,
-      loadFeedSnapshot: async () => {
+      loadFeedSnapshot: async (options) => {
         if (input.feed?.delayMs) {
           await sleep(input.feed.delayMs);
+        }
+
+        if (options?.fid && options?.neynarApiKey) {
+          if (input.feed?.personalizedError) {
+            throw new Error(input.feed.personalizedError);
+          }
+
+          const personalizedSnapshot = input.feed?.personalizedSnapshot ?? input.feed?.snapshot;
+
+          if (!personalizedSnapshot) {
+            throw new Error("No personalized feed snapshot mock configured.");
+          }
+
+          return personalizedSnapshot;
         }
 
         if (input.feed?.error) {
