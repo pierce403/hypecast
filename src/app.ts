@@ -581,11 +581,7 @@ function summarizeText(value: string, maxLength = 68): string {
   return `${value.slice(0, maxLength - 1).trimEnd()}...`;
 }
 
-function formatSnapshotStamp(value?: string): string {
-  if (!value) {
-    return "Waiting for first sync";
-  }
-
+function formatLocalDateTime(value: string, includeTimeZone = false): string {
   const timestamp = new Date(value);
 
   if (Number.isNaN(timestamp.getTime())) {
@@ -595,9 +591,19 @@ function formatSnapshotStamp(value?: string): string {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
+    year: "numeric",
     hour: "numeric",
-    minute: "2-digit"
+    minute: "2-digit",
+    ...(includeTimeZone ? { timeZoneName: "short" } : {})
   }).format(timestamp);
+}
+
+function formatSnapshotStamp(value?: string): string {
+  if (!value) {
+    return "Waiting for first sync";
+  }
+
+  return formatLocalDateTime(value);
 }
 
 function getTimelineTabs(snapshot?: FeedSnapshot): Array<{ id: TimelineTab; label: string }> {
@@ -1814,6 +1820,7 @@ function renderSettingsOverlay(state: AppState): string {
     : "Browser tab";
   const snapshotStamp = state.feed.snapshot?.generatedAt ?? "No feed loaded";
   const feedMode = state.feed.snapshot?.mode === "following" ? "Personal following" : "Public fallback";
+  const buildTimeLabel = formatLocalDateTime(BUILD_INFO.time, true);
 
   return `
     <div class="overlay-backdrop">
@@ -1842,7 +1849,11 @@ function renderSettingsOverlay(state: AppState): string {
               </div>
               <div class="mini-item">
                 <span>Build time</span>
-                <strong class="settings-value" data-build-time>${escapeHtml(BUILD_INFO.time)}</strong>
+                <strong
+                  class="settings-value"
+                  data-build-time
+                  title="${escapeAttribute(BUILD_INFO.time)}"
+                >${escapeHtml(buildTimeLabel)}</strong>
               </div>
               <div class="mini-item">
                 <span>Surface</span>

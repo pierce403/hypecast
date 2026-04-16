@@ -262,6 +262,13 @@ test("shows the current build id and build time in Settings", async ({ page }) =
   await expect(settingsSheet.getByRole("heading", { level: 3, name: "About this build" })).toBeVisible();
   await expect(settingsSheet.locator("[data-build-id]")).toHaveText(/[0-9a-f]{7}|dev/);
   await expect(settingsSheet.locator("[data-build-time]")).toHaveText(
+    /[A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2} [AP]M (?:[A-Z]{2,5}|GMT[+-]\d{1,2})/
+  );
+  await expect(settingsSheet.locator("[data-build-time]")).toHaveAttribute(
+    "title",
+    /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/
+  );
+  await expect(settingsSheet.locator("[data-build-time]")).not.toHaveText(
     /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/
   );
 });
