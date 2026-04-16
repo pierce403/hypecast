@@ -1041,48 +1041,85 @@ function renderFeedActionButton(options: {
   `;
 }
 
+function renderLocalReactionNotice(cast: FeedCast, ui: UiState): string {
+  if (hasRealFarcasterWriteConfigured()) {
+    return "";
+  }
+
+  const interaction = feedInteractionState(ui, cast.id);
+  const activeActions: string[] = [];
+
+  if (interaction.liked) {
+    activeActions.push("Like");
+  }
+
+  if (interaction.recasted) {
+    activeActions.push("Recast");
+  }
+
+  if (activeActions.length === 0) {
+    return "";
+  }
+
+  const safePermalink = sanitizeLinkUrl(cast.permalink);
+
+  return `
+    <div class="feed-action-status" data-feed-action-status>
+      <p>${escapeHtml(`${activeActions.join(" + ")} saved in Hypecast only. It has not been sent to Farcaster.`)}</p>
+      ${
+        safePermalink
+          ? `<a class="feed-action-status-link" href="${escapeAttribute(safePermalink)}" target="_blank" rel="noreferrer">Open on Farcaster</a>`
+          : ""
+      }
+    </div>
+  `;
+}
+
 function renderFeedActions(cast: FeedCast, state: AppState, ui: UiState): string {
   const interaction = feedInteractionState(ui, cast.id);
   const replyTarget = getReplyTargetCast(state, ui);
 
   return `
-    <div class="feed-actions">
-      ${renderFeedActionButton({
-        action: "reply-cast",
-        castId: cast.id,
-        icon: "comment",
-        label: `Reply to cast by ${cast.authorName}`,
-        active: replyTarget?.id === cast.id && ui.overlay === "composer",
-        count: replyCountForCast(cast, ui),
-        tone: "reply"
-      })}
-      ${renderFeedActionButton({
-        action: "recast-cast",
-        castId: cast.id,
-        icon: "refresh",
-        label: `${interaction.recasted ? "Undo recast" : "Recast"} cast by ${cast.authorName}`,
-        active: interaction.recasted === true,
-        count: recastCountForCast(cast, ui),
-        pressed: interaction.recasted === true,
-        tone: "recast"
-      })}
-      ${renderFeedActionButton({
-        action: "like-cast",
-        castId: cast.id,
-        icon: "heart",
-        label: `${interaction.liked ? "Unlike" : "Like"} cast by ${cast.authorName}`,
-        active: interaction.liked === true,
-        count: likeCountForCast(cast, ui),
-        pressed: interaction.liked === true,
-        tone: "like"
-      })}
-      ${renderFeedActionButton({
-        action: "share-cast",
-        castId: cast.id,
-        icon: "share",
-        label: `Share cast by ${cast.authorName}`,
-        tone: "share"
-      })}
+    <div class="feed-actions-wrap">
+      <div class="feed-actions">
+        ${renderFeedActionButton({
+          action: "reply-cast",
+          castId: cast.id,
+          icon: "comment",
+          label: `Reply to cast by ${cast.authorName}`,
+          active: replyTarget?.id === cast.id && ui.overlay === "composer",
+          count: replyCountForCast(cast, ui),
+          tone: "reply"
+        })}
+        ${renderFeedActionButton({
+          action: "recast-cast",
+          castId: cast.id,
+          icon: "refresh",
+          label: `${interaction.recasted ? "Undo recast" : "Recast"} cast by ${cast.authorName}`,
+          active: interaction.recasted === true,
+          count: recastCountForCast(cast, ui),
+          pressed: interaction.recasted === true,
+          tone: "recast"
+        })}
+        ${renderFeedActionButton({
+          action: "like-cast",
+          castId: cast.id,
+          icon: "heart",
+          label: `${interaction.liked ? "Unlike" : "Like"} cast by ${cast.authorName}`,
+          active: interaction.liked === true,
+          count: likeCountForCast(cast, ui),
+          pressed: interaction.liked === true,
+          tone: "like"
+        })}
+        ${renderFeedActionButton({
+          action: "share-cast",
+          castId: cast.id,
+          icon: "share",
+          label: `Share cast by ${cast.authorName}`,
+          tone: "share"
+        })}
+      </div>
+      ${renderLocalReactionNotice(cast, ui)}
     </div>
   `;
 }
@@ -2637,6 +2674,41 @@ export function createApp(root: HTMLDivElement): void {
           count: likeCountForCast(cast, ui)
         })
       );
+
+    const affectedFeedCards = new Set<HTMLElement>();
+
+    root
+      .querySelectorAll<HTMLElement>(
+        `.feed-card [data-action="like-cast"][data-cast-id="${CSS.escape(castId)}"], .feed-card [data-action="recast-cast"][data-cast-id="${CSS.escape(castId)}"]`
+      )
+      .forEach((button) => {
+        const feedCard = button.closest<HTMLElement>(".feed-card");
+
+        if (feedCard) {
+          affectedFeedCards.add(feedCard);
+        }
+      });
+
+    const noticeMarkup = renderLocalReactionNotice(cast, ui);
+
+    affectedFeedCards.forEach((feedCard) => {
+      const statusContainer = feedCard.querySelector<HTMLElement>("[data-feed-action-status]");
+
+      if (statusContainer) {
+        if (noticeMarkup) {
+          statusContainer.outerHTML = noticeMarkup;
+        } else {
+          statusContainer.remove();
+        }
+        return;
+      }
+
+      if (noticeMarkup) {
+        feedCard
+          .querySelector<HTMLElement>(".feed-actions-wrap")
+          ?.insertAdjacentHTML("beforeend", noticeMarkup);
+      }
+    });
   };
 
   const upsertAuthorFilter = (targetList: string[], authorHandle: string | undefined): boolean => {

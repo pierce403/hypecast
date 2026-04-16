@@ -205,6 +205,12 @@ test("reply, recast, and like buttons update cast state", async ({ page }) => {
   await likeButton.click();
   await expect(likeButton).toHaveAttribute("aria-pressed", "true");
   await expect(likeButton.locator(".feed-action-count")).toHaveText("30");
+  await expect(
+    main.getByText("Like saved in Hypecast only. It has not been sent to Farcaster.")
+  ).toBeVisible();
+  await expect(
+    main.locator('.feed-action-status-link[href="https://warpcast.com/farcaster/0xcastfarcastersnaps"]')
+  ).toBeVisible();
   await expect
     .poll(async () => shellContent.evaluate((node) => node.scrollTop))
     .toBeGreaterThan(0);
@@ -212,6 +218,9 @@ test("reply, recast, and like buttons update cast state", async ({ page }) => {
   await recastButton.click();
   await expect(recastButton).toHaveAttribute("aria-pressed", "true");
   await expect(recastButton.locator(".feed-action-count")).toHaveText("13");
+  await expect(
+    main.getByText("Like + Recast saved in Hypecast only. It has not been sent to Farcaster.")
+  ).toBeVisible();
 
   await signInWithFarcaster(page);
   await page.getByRole("button", { name: "Close account sheet" }).click();

@@ -53,6 +53,7 @@ export const defaultFeedSnapshot: FeedSnapshot = {
       timestamp: 1775599170000,
       contextLabel: "in protocol",
       text: "introducing snaps. a new primitive for richer, interactive feed posts.",
+      permalink: "https://warpcast.com/farcaster/0xcastfarcastersnaps",
       replies: 4,
       recasts: 12,
       reactions: 29,

@@ -31,6 +31,7 @@
   - Plain image/video attachments can render without redundant title/source captions
   - Pulling down from the top of the feed triggers a fresh snapshot request without moving the pinned bottom rail
   - Reply, recast, and like controls now update local cast state directly inside the shell without rerendering the full feed
+  - Like and recast interactions explicitly warn when they were only saved inside Hypecast, and can deep-link back to the original cast when a Farcaster permalink is available
   - Cast overflow menus expose local delete, copy-link, mute, and block actions inside an in-app context sheet
   - Shared cast routes with `cast` and optional `fid` query params can reopen a targeted cast inside the feed shell, and route parsing also understands wrapped Farcaster/Warpcast URLs
 - **Test Criteria**:
@@ -45,6 +46,7 @@
   - [x] Video cards expose an inline play control inside the feed
   - [x] Pulling down at scroll-top refreshes the feed snapshot
   - [x] Reply, recast, and like buttons mutate local shell state and counts
+  - [x] Local-only likes and recasts are visibly labeled so they are not mistaken for Farcaster network writes
   - [x] Cast overflow actions can delete, copy, mute, and block locally inside Hypecast
   - [x] Shared cast routes reopen the requested cast in the shell on mobile and desktop
 
