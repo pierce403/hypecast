@@ -248,6 +248,24 @@ test("loads a personalized following feed automatically after Farcaster sign-in"
   await expect(main.getByText("A real following-feed cast just landed in Hypecast.")).toBeVisible();
 });
 
+test("shows the current build id and build time in Settings", async ({ page }) => {
+  const nav = primaryNav(page);
+
+  await mountApp(page);
+
+  await nav.getByRole("button", { name: "Apps" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+
+  const settingsSheet = overlaySheet(page);
+
+  await expect(settingsSheet.getByRole("heading", { level: 2, name: "Settings" })).toBeVisible();
+  await expect(settingsSheet.getByRole("heading", { level: 3, name: "About this build" })).toBeVisible();
+  await expect(settingsSheet.locator("[data-build-id]")).toHaveText(/[0-9a-f]{7}|dev/);
+  await expect(settingsSheet.locator("[data-build-time]")).toHaveText(
+    /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/
+  );
+});
+
 test("keeps the bottom nav pinned while the feed scrolls", async ({ page }) => {
   const nav = primaryNav(page);
 

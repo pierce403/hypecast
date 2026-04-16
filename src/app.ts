@@ -31,9 +31,12 @@ import type {
   XmtpState
 } from "./types";
 
+declare const __HYPECAST_BUILD_ID__: string;
+declare const __HYPECAST_BUILD_TIME__: string;
+
 type NavPane = "home" | "apps" | "wallet" | "notifications" | "chat";
 type TimelineTab = string;
-type Overlay = "none" | "profile" | "search" | "composer";
+type Overlay = "none" | "profile" | "search" | "composer" | "settings";
 type IconName =
   | "apps"
   | "bell"
@@ -115,6 +118,10 @@ const navItems: Array<{ id: NavPane; label: string; icon: IconName }> = [
 const PULL_REFRESH_THRESHOLD_PX = 88;
 const PULL_REFRESH_MAX_PX = 132;
 const PULL_REFRESH_HOLD_PX = 66;
+const BUILD_INFO = {
+  id: __HYPECAST_BUILD_ID__,
+  time: __HYPECAST_BUILD_TIME__
+} as const;
 
 
 function loadStoredJson<T>(key: string): T | null {
@@ -572,6 +579,25 @@ function summarizeText(value: string, maxLength = 68): string {
   }
 
   return `${value.slice(0, maxLength - 1).trimEnd()}...`;
+}
+
+function formatSnapshotStamp(value?: string): string {
+  if (!value) {
+    return "Waiting for first sync";
+  }
+
+  const timestamp = new Date(value);
+
+  if (Number.isNaN(timestamp.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(timestamp);
 }
 
 function getTimelineTabs(snapshot?: FeedSnapshot): Array<{ id: TimelineTab; label: string }> {
@@ -1368,14 +1394,7 @@ function renderHomePane(state: AppState, ui: UiState): string {
 }
 
 function renderAppsPane(state: AppState): string {
-  const snapshotStamp = state.feed.snapshot
-    ? new Intl.DateTimeFormat("en-US", {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit"
-      }).format(new Date(state.feed.snapshot.generatedAt))
-    : "Waiting for first sync";
+  const snapshotStamp = formatSnapshotStamp(state.feed.snapshot?.generatedAt);
 
   return `
     <section class="pane-stack">
@@ -1392,6 +1411,7 @@ function renderAppsPane(state: AppState): string {
           <button class="secondary-button" type="button" data-action="farcaster">Farcaster</button>
           <button class="secondary-button" type="button" data-action="wallet">Wallet</button>
           <button class="secondary-button" type="button" data-action="xmtp">XMTP</button>
+          <button class="secondary-button" type="button" data-action="settings">Settings</button>
         </div>
       </article>
 
@@ -1779,8 +1799,76 @@ function renderProfileOverlay(state: AppState): string {
           <button class="primary-button" type="button" data-action="farcaster">
             ${state.farcaster.status === "connected" ? "Refresh Farcaster" : "Sign In With Farcaster"}
           </button>
+          <button class="secondary-button" type="button" data-action="settings">Settings</button>
           <button class="secondary-button" type="button" data-action="wallet">Wallet</button>
           <button class="secondary-button" type="button" data-action="xmtp">XMTP</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderSettingsOverlay(state: AppState): string {
+  const runningSurface = window.matchMedia("(display-mode: standalone)").matches
+    ? "Standalone app"
+    : "Browser tab";
+  const snapshotStamp = state.feed.snapshot?.generatedAt ?? "No feed loaded";
+  const feedMode = state.feed.snapshot?.mode === "following" ? "Personal following" : "Public fallback";
+
+  return `
+    <div class="overlay-backdrop">
+      <section class="overlay-sheet">
+        <div class="sheet-head">
+          <div>
+            <p class="eyebrow-label">settings</p>
+            <h2>Settings</h2>
+            <p class="support-copy">Use About to confirm the exact bundle currently running on this device.</p>
+          </div>
+          <button class="icon-button" type="button" data-action="close-overlay" aria-label="Close settings">
+            ${renderIcon("close")}
+          </button>
+        </div>
+        <div class="settings-stack">
+          <article class="pane-card">
+            <p class="eyebrow-label">about</p>
+            <h3>About this build</h3>
+            <p class="support-copy">
+              If these values do not match the newest deploy, fully close and reopen the installed app to pick up the latest service worker.
+            </p>
+            <div class="mini-list">
+              <div class="mini-item">
+                <span>Build ID</span>
+                <strong class="settings-value" data-build-id>${escapeHtml(BUILD_INFO.id)}</strong>
+              </div>
+              <div class="mini-item">
+                <span>Build time</span>
+                <strong class="settings-value" data-build-time>${escapeHtml(BUILD_INFO.time)}</strong>
+              </div>
+              <div class="mini-item">
+                <span>Surface</span>
+                <strong class="settings-value">${escapeHtml(runningSurface)}</strong>
+              </div>
+            </div>
+          </article>
+
+          <article class="pane-card">
+            <p class="eyebrow-label">runtime</p>
+            <h3>Current data</h3>
+            <div class="mini-list">
+              <div class="mini-item">
+                <span>Feed snapshot</span>
+                <strong class="settings-value">${escapeHtml(snapshotStamp)}</strong>
+              </div>
+              <div class="mini-item">
+                <span>Feed mode</span>
+                <strong class="settings-value">${escapeHtml(feedMode)}</strong>
+              </div>
+              <div class="mini-item">
+                <span>Farcaster</span>
+                <strong class="settings-value">${escapeHtml(profileHandle(state.farcaster.profile))}</strong>
+              </div>
+            </div>
+          </article>
         </div>
       </section>
     </div>
@@ -1865,6 +1953,8 @@ function renderOverlay(state: AppState, ui: UiState): string {
       return renderSearchOverlay(state, ui);
     case "profile":
       return renderProfileOverlay(state);
+    case "settings":
+      return renderSettingsOverlay(state);
     case "composer":
       return renderComposerOverlay(state, ui);
     case "none":
@@ -2489,6 +2579,10 @@ export function createApp(root: HTMLDivElement): void {
               }
             : undefined
         );
+        break;
+      case "settings":
+        ui.overlay = ui.overlay === "settings" ? "none" : "settings";
+        render();
         break;
       case "reply-cast":
         if (!castId) {

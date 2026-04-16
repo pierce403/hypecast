@@ -1,9 +1,35 @@
+import { execSync } from "node:child_process";
+
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+
+const buildId = (() => {
+  const githubSha = process.env.GITHUB_SHA?.trim();
+
+  if (githubSha) {
+    return githubSha.slice(0, 7);
+  }
+
+  try {
+    return execSync("git rev-parse --short HEAD", {
+      stdio: ["ignore", "pipe", "ignore"]
+    })
+      .toString()
+      .trim();
+  } catch {
+    return "dev";
+  }
+})();
+
+const buildTime = new Date().toISOString();
 
 export default defineConfig({
   build: {
     target: "esnext"
+  },
+  define: {
+    __HYPECAST_BUILD_ID__: JSON.stringify(buildId),
+    __HYPECAST_BUILD_TIME__: JSON.stringify(buildTime)
   },
   optimizeDeps: {
     exclude: ["@xmtp/wasm-bindings", "@xmtp/browser-sdk"],

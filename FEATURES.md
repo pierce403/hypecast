@@ -25,6 +25,7 @@
   - The account sheet still allows a browser-local Neynar override without rebuilding the app
   - Desktop viewports center the interactive shell and add non-interactive context rails without moving core controls outside the shell
   - Search and composer affordances open in-app overlays that reserve the intended interaction pattern
+  - Settings now exposes an About view with the exact build id and build time running in the shell
   - Link preview cards are clickable, while direct image/video attachments expose explicit download controls
   - Plain image/video attachments can render without redundant title/source captions
   - Pulling down from the top of the feed triggers a fresh snapshot request without moving the pinned bottom rail
@@ -36,6 +37,7 @@
   - [x] Real Farcaster snapshot data hydrates the feed instead of local scaffold content
   - [x] Signed-in users can load a personalized following feed from their own `fid` without manual key entry
   - [x] Wide desktop viewports keep the shell centered and framed cleanly
+  - [x] Settings shows a non-empty build id and build time for the current bundle
   - [x] Link previews are actionable and image/video cards expose media downloads
   - [x] Pulling down at scroll-top refreshes the feed snapshot
   - [x] Reply, recast, and like buttons mutate local shell state and counts

@@ -138,6 +138,7 @@ Notes:
 - Keep pure trust-boundary logic testable from Vitest. The current unit-test surface lives in `src/services/security.test.ts` and `src/services/feed.test.ts`.
 - The Playwright config targets a mobile Chromium profile and blocks service workers to keep the shell tests deterministic.
 - The app rerenders the shell from `root.innerHTML`, so any live text inputs added to overlays need explicit focus restoration after render, or typing/search will break.
+- Build metadata is stamped in `vite.config.ts` via `__HYPECAST_BUILD_ID__` and `__HYPECAST_BUILD_TIME__`, and surfaced in the Settings overlay in `src/app.ts`. If version visibility regresses, check those two files first.
 - Playwright defaults now include a mocked feed snapshot; if you change timeline tabs or feed copy, update `tests/feed-fixture.ts` and the corresponding E2E assertions together.
 - The profile/account overlay now owns the Farcaster QR and deep-link handoff. If you change the auth flow, keep that overlay scrollable on mobile so the close button and QR stay reachable.
 - If you learn a new repo-specific command, deployment quirk, or SDK hazard, add it here before finishing the task.

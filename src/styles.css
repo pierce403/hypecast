@@ -1149,6 +1149,22 @@ code {
   margin-bottom: 6px;
 }
 
+.settings-stack {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.settings-stack h3 {
+  margin: 8px 0 0;
+  font-size: 1.08rem;
+  letter-spacing: -0.02em;
+}
+
+.settings-value {
+  overflow-wrap: anywhere;
+}
+
 .profile-sheet,
 .composer-head {
   display: grid;
