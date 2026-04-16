@@ -97,7 +97,7 @@ Notes:
 - `vite@^7.3.2`
 - `vite-plugin-pwa@^1.2.0`
 - `typescript@^6.0.2`
-- `hls.js@^1.6.13`
+- `hls.js@^1.6.16`
 - `viem@^2.47.18`
 - `@farcaster/auth-client@^0.7.1`
 - `@xmtp/browser-sdk@^7.0.0`
