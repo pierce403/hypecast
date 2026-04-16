@@ -261,10 +261,13 @@ code {
 }
 
 .shell-content {
+  --pull-refresh-distance: 0px;
+  --pull-refresh-progress: 0;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding-bottom: 104px;
+  overscroll-behavior-y: contain;
   scrollbar-width: none;
 }
 
@@ -272,9 +275,63 @@ code {
   display: none;
 }
 
+.feed-shell,
 .feed-stack,
 .pane-stack {
   display: grid;
+}
+
+.feed-shell {
+  transform: translateY(var(--pull-refresh-distance));
+  transition: transform 180ms ease;
+}
+
+.shell-content.is-pull-refresh-active .feed-shell,
+.shell-content.is-pull-refresh-refreshing .feed-shell {
+  transition: none;
+}
+
+.pull-refresh {
+  position: relative;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.pull-refresh-indicator {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(13, 13, 16, 0.96);
+  color: var(--muted);
+  transform: translate(-50%, calc(var(--pull-refresh-distance) * 0.55 - 54px));
+  opacity: calc(var(--pull-refresh-progress) * 1.4);
+  box-shadow: var(--shadow);
+}
+
+.pull-refresh-indicator .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.shell-content.is-pull-refresh-armed .pull-refresh-indicator,
+.shell-content.is-pull-refresh-refreshing .pull-refresh-indicator {
+  color: var(--text);
+}
+
+.shell-content.is-pull-refresh-armed .pull-refresh-indicator .icon,
+.shell-content.is-pull-refresh-refreshing .pull-refresh-indicator .icon {
+  color: var(--warm);
+}
+
+.shell-content.is-pull-refresh-refreshing .pull-refresh-indicator .icon {
+  animation: pull-refresh-spin 0.9s linear infinite;
 }
 
 .feed-card {
@@ -330,6 +387,16 @@ code {
 
 .feed-main {
   min-width: 0;
+}
+
+@keyframes pull-refresh-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .author-row {

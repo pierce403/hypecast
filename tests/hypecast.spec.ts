@@ -5,9 +5,11 @@ import {
   dispatchInstallPrompt,
   mountApp,
   primaryNav,
-  shortAddress
+  shortAddress,
+  triggerPullToRefresh
 } from "./test-helpers";
 import type { FeedSnapshot } from "../src/types";
+import { defaultFeedSnapshot } from "./feed-fixture";
 
 const personalizedFeedSnapshot: FeedSnapshot = {
   generatedAt: "2026-04-16T04:00:00.000Z",
@@ -235,6 +237,41 @@ test("keeps the bottom nav pinned while the feed scrolls", async ({ page }) => {
   expect(Math.round(after?.y ?? 0)).toBe(Math.round(before?.y ?? 0));
   expect(pageMetricsBefore.scrollHeight - pageMetricsBefore.clientHeight).toBeLessThanOrEqual(2);
   expect((after?.y ?? 0) + (after?.height ?? 0)).toBeLessThanOrEqual((viewport?.height ?? 0) + 1);
+});
+
+test("pulling down from the top of the feed refreshes the snapshot", async ({ page }) => {
+  const main = shellMain(page);
+  const refreshedSnapshot: FeedSnapshot = {
+    ...defaultFeedSnapshot,
+    generatedAt: "2026-04-16T09:30:00.000Z",
+    casts: [
+      {
+        id: "cast-refresh-new",
+        channel: "following",
+        authorName: "Refresh Bot",
+        authorHandle: "refreshbot",
+        authorInitial: "R",
+        accentClass: "accent-live",
+        timestamp: 1776331800000,
+        contextLabel: "in following",
+        text: "Pull to refresh just loaded a newer snapshot."
+      },
+      ...defaultFeedSnapshot.casts
+    ]
+  };
+
+  await mountApp(page, {
+    feed: {
+      delayMs: 20,
+      snapshots: [defaultFeedSnapshot, refreshedSnapshot]
+    }
+  });
+
+  await expect(main.getByText("Pull to refresh just loaded a newer snapshot.")).toHaveCount(0);
+
+  await triggerPullToRefresh(page);
+
+  await expect(main.getByText("Pull to refresh just loaded a newer snapshot.")).toBeVisible();
 });
 
 test("updates install state from the install prompt lifecycle", async ({ page }) => {

@@ -27,6 +27,7 @@
   - Search and composer affordances open in-app overlays that reserve the intended interaction pattern
   - Link preview cards are clickable, while direct image/video attachments expose explicit download controls
   - Plain image/video attachments can render without redundant title/source captions
+  - Pulling down from the top of the feed triggers a fresh snapshot request without moving the pinned bottom rail
 - **Test Criteria**:
   - [x] Logged-in and signed-out states both render inside the same mobile shell
   - [x] Avatar, search, bottom nav, and floating compose button stay visible on mobile
@@ -35,6 +36,7 @@
   - [x] Signed-in users can load a personalized following feed from their own `fid` without manual key entry
   - [x] Wide desktop viewports keep the shell centered and framed cleanly
   - [x] Link previews are actionable and image/video cards expose media downloads
+  - [x] Pulling down at scroll-top refreshes the feed snapshot
 
 ### Client Security Model
 - **Stability**: in-progress

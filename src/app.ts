@@ -75,6 +75,14 @@ interface FocusTarget {
   end?: number;
 }
 
+interface PullToRefreshState {
+  active: boolean;
+  refreshing: boolean;
+  shouldRefresh: boolean;
+  distancePx: number;
+  startY: number;
+}
+
 const STORAGE_KEYS = {
   farcasterProfile: "hypecast:farcaster-profile",
   composerDraft: "hypecast:composer-draft",
@@ -93,6 +101,10 @@ const navItems: Array<{ id: NavPane; label: string; icon: IconName }> = [
   { id: "notifications", label: "Notifications", icon: "bell" },
   { id: "chat", label: "Chat", icon: "chat" }
 ];
+
+const PULL_REFRESH_THRESHOLD_PX = 88;
+const PULL_REFRESH_MAX_PX = 132;
+const PULL_REFRESH_HOLD_PX = 66;
 
 
 function loadStoredJson<T>(key: string): T | null {
@@ -1144,7 +1156,17 @@ function renderHomePane(state: AppState, ui: UiState): string {
     cards.push(...filteredCasts.map(renderFeedCast));
   }
 
-  return `<section class="feed-stack">${cards.join("")}</section>`;
+  return `
+    <section class="feed-shell" data-feed-shell>
+      <div class="pull-refresh" aria-hidden="true">
+        <div class="pull-refresh-indicator" data-pull-refresh-indicator>
+          ${renderIcon("refresh")}
+          <span data-pull-refresh-label>Pull to refresh</span>
+        </div>
+      </div>
+      <section class="feed-stack">${cards.join("")}</section>
+    </section>
+  `;
 }
 
 function renderAppsPane(state: AppState): string {
@@ -1728,11 +1750,63 @@ function template(
 export function createApp(root: HTMLDivElement): void {
   const state = getInitialState();
   const ui = getInitialUiState();
+  const pullToRefresh: PullToRefreshState = {
+    active: false,
+    refreshing: false,
+    shouldRefresh: false,
+    distancePx: 0,
+    startY: 0
+  };
   let walletSession: WalletSession | null = null;
   let xmtpSession: Awaited<ReturnType<typeof connectXmtp>> | null = null;
+  let activeFeedRefreshPromise: Promise<void> | null = null;
+
+  const isPullToRefreshEnabled = () => ui.activePane === "home" && ui.overlay === "none";
+
+  const resetPullToRefresh = () => {
+    pullToRefresh.active = false;
+    pullToRefresh.shouldRefresh = false;
+    pullToRefresh.distancePx = 0;
+    pullToRefresh.startY = 0;
+  };
+
+  const pullToRefreshLabel = () => {
+    if (pullToRefresh.refreshing) {
+      return "Refreshing feed";
+    }
+
+    return pullToRefresh.shouldRefresh ? "Release to refresh" : "Pull to refresh";
+  };
+
+  const syncPullToRefreshUi = () => {
+    if (!isPullToRefreshEnabled() && !pullToRefresh.refreshing) {
+      resetPullToRefresh();
+    }
+
+    const shellContent = root.querySelector<HTMLElement>(".shell-content");
+    const label = root.querySelector<HTMLElement>("[data-pull-refresh-label]");
+    const distancePx = isPullToRefreshEnabled() || pullToRefresh.refreshing ? pullToRefresh.distancePx : 0;
+    const progress = Math.min(1, distancePx / PULL_REFRESH_THRESHOLD_PX);
+
+    if (shellContent) {
+      shellContent.style.setProperty("--pull-refresh-distance", `${distancePx}px`);
+      shellContent.style.setProperty("--pull-refresh-progress", progress.toFixed(3));
+      shellContent.classList.toggle(
+        "is-pull-refresh-active",
+        pullToRefresh.active || pullToRefresh.refreshing
+      );
+      shellContent.classList.toggle("is-pull-refresh-armed", pullToRefresh.shouldRefresh);
+      shellContent.classList.toggle("is-pull-refresh-refreshing", pullToRefresh.refreshing);
+    }
+
+    if (label) {
+      label.textContent = pullToRefreshLabel();
+    }
+  };
 
   const render = (focusTarget?: FocusTarget) => {
     root.innerHTML = template(state, ui);
+    syncPullToRefreshUi();
 
     if (!focusTarget) {
       return;
@@ -1768,42 +1842,60 @@ export function createApp(root: HTMLDivElement): void {
   };
 
   const refreshFeedSnapshot = async () => {
+    if (activeFeedRefreshPromise) {
+      return activeFeedRefreshPromise;
+    }
+
     const neynarApiKey = getEffectiveNeynarApiKey();
     const fid = state.farcaster.profile?.fid;
 
-    setPartialState({
-      feed: {
-        status: "loading",
-        snapshot: state.feed.snapshot
-      }
-    });
-
-    try {
-      const snapshot = await loadFeedSnapshot({
-        fid,
-        neynarApiKey
-      });
-      const nextTabs = new Set(getTimelineTabs(snapshot).map((tab) => tab.id));
-
-      if (!nextTabs.has(ui.activeTimeline)) {
-        ui.activeTimeline = feedAggregateTab.id;
-      }
-
+    activeFeedRefreshPromise = (async () => {
       setPartialState({
         feed: {
-          status: "ready",
-          snapshot
+          status: "loading",
+          snapshot: state.feed.snapshot
         }
       });
-    } catch (error) {
-      setPartialState({
-        feed: {
-          status: "error",
-          snapshot: state.feed.snapshot,
-          error: error instanceof Error ? error.message : "The feed snapshot request failed."
+
+      try {
+        const snapshot = await loadFeedSnapshot({
+          fid,
+          neynarApiKey
+        });
+        const nextTabs = new Set(getTimelineTabs(snapshot).map((tab) => tab.id));
+
+        if (!nextTabs.has(ui.activeTimeline)) {
+          ui.activeTimeline = feedAggregateTab.id;
         }
-      });
-    }
+
+        setPartialState({
+          feed: {
+            status: "ready",
+            snapshot
+          }
+        });
+      } catch (error) {
+        setPartialState({
+          feed: {
+            status: "error",
+            snapshot: state.feed.snapshot,
+            error: error instanceof Error ? error.message : "The feed snapshot request failed."
+          }
+        });
+      } finally {
+        activeFeedRefreshPromise = null;
+
+        if (pullToRefresh.refreshing) {
+          pullToRefresh.refreshing = false;
+          pullToRefresh.shouldRefresh = false;
+          pullToRefresh.distancePx = 0;
+          pullToRefresh.startY = 0;
+          syncPullToRefreshUi();
+        }
+      }
+    })();
+
+    return activeFeedRefreshPromise;
   };
 
   const handlePublishCast = () => {
@@ -1976,6 +2068,114 @@ export function createApp(root: HTMLDivElement): void {
       });
     }
   };
+
+  const resolvePullRefreshContainer = (eventTarget: EventTarget | null): HTMLElement | null => {
+    if (!(eventTarget instanceof Element)) {
+      return null;
+    }
+
+    const shellContent = eventTarget.closest<HTMLElement>(".shell-content");
+
+    if (!shellContent || !root.contains(shellContent)) {
+      return null;
+    }
+
+    return shellContent;
+  };
+
+  const startPullToRefresh = (event: TouchEvent) => {
+    if (
+      !isPullToRefreshEnabled() ||
+      pullToRefresh.refreshing ||
+      state.feed.status === "loading"
+    ) {
+      return;
+    }
+
+    const shellContent = resolvePullRefreshContainer(event.target);
+    const primaryTouch = event.touches[0];
+
+    if (!shellContent || !primaryTouch || shellContent.scrollTop > 0) {
+      return;
+    }
+
+    pullToRefresh.active = true;
+    pullToRefresh.shouldRefresh = false;
+    pullToRefresh.distancePx = 0;
+    pullToRefresh.startY = primaryTouch.clientY;
+    syncPullToRefreshUi();
+  };
+
+  const movePullToRefresh = (event: TouchEvent) => {
+    if (!pullToRefresh.active) {
+      return;
+    }
+
+    if (!isPullToRefreshEnabled()) {
+      resetPullToRefresh();
+      syncPullToRefreshUi();
+      return;
+    }
+
+    const shellContent = root.querySelector<HTMLElement>(".shell-content");
+    const primaryTouch = event.touches[0];
+
+    if (!shellContent || !primaryTouch) {
+      return;
+    }
+
+    if (shellContent.scrollTop > 0) {
+      resetPullToRefresh();
+      syncPullToRefreshUi();
+      return;
+    }
+
+    const deltaY = primaryTouch.clientY - pullToRefresh.startY;
+
+    if (deltaY <= 0) {
+      pullToRefresh.distancePx = 0;
+      pullToRefresh.shouldRefresh = false;
+      syncPullToRefreshUi();
+      return;
+    }
+
+    event.preventDefault();
+    pullToRefresh.distancePx = Math.min(PULL_REFRESH_MAX_PX, deltaY * 0.48);
+    pullToRefresh.shouldRefresh = pullToRefresh.distancePx >= PULL_REFRESH_THRESHOLD_PX;
+    syncPullToRefreshUi();
+  };
+
+  const finishPullToRefresh = () => {
+    if (!pullToRefresh.active) {
+      return;
+    }
+
+    pullToRefresh.active = false;
+
+    if (!pullToRefresh.shouldRefresh) {
+      resetPullToRefresh();
+      syncPullToRefreshUi();
+      return;
+    }
+
+    pullToRefresh.refreshing = true;
+    pullToRefresh.shouldRefresh = false;
+    pullToRefresh.distancePx = PULL_REFRESH_HOLD_PX;
+    syncPullToRefreshUi();
+    void refreshFeedSnapshot();
+  };
+
+  root.addEventListener("touchstart", startPullToRefresh, { passive: true });
+  root.addEventListener("touchmove", movePullToRefresh, { passive: false });
+  root.addEventListener("touchend", finishPullToRefresh);
+  root.addEventListener("touchcancel", () => {
+    if (pullToRefresh.refreshing) {
+      return;
+    }
+
+    resetPullToRefresh();
+    syncPullToRefreshUi();
+  });
 
   root.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) {

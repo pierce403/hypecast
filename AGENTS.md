@@ -145,6 +145,7 @@ Notes:
 - The working built-in Neynar fallback was verified against the live following-feed endpoint on April 16, 2026. An older key still referenced in `../converge.cv/AGENTS.md` is dead and should not be copied forward.
 - Neynar image embeds often arrive as `metadata.content_type: image/*` plus `metadata.image`, even when the URL has no file extension. The media normalizer must treat those as images and should rank direct image/OG/frame previews above embedded-cast fallbacks.
 - Media downloads are handled client-side in `src/app.ts` with a fetch-to-blob attempt and a new-tab fallback. If you add new downloadable media surfaces, keep them behind sanitized URLs and `data-download-url` buttons.
+- Pull-to-refresh now lives on `.shell-content` in `src/app.ts` and only arms when Home is at scroll-top with no overlay open. Keep the gesture tied to the feed scroller so the bottom nav stays fixed.
 - Playwright now runs against both `mobile-chromium` and `desktop-chromium`. If layout changes are viewport-specific, keep assertions for both form factors green.
 
 ## Rapport & Reflection

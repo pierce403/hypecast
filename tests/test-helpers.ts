@@ -47,6 +47,7 @@ interface FeedMockOptions {
   error?: string;
   personalizedError?: string;
   personalizedSnapshot?: FeedSnapshot;
+  snapshots?: FeedSnapshot[];
   snapshot?: FeedSnapshot;
 }
 
@@ -66,6 +67,36 @@ export function shortAddress(address: string): string {
 
 export function primaryNav(page: Page) {
   return page.getByRole("navigation", { name: "Primary" });
+}
+
+export async function triggerPullToRefresh(page: Page): Promise<void> {
+  await page.locator(".shell-content").evaluate((node) => {
+    const dispatchTouch = (type: string, clientY: number) => {
+      const event = new Event(type, {
+        bubbles: true,
+        cancelable: true
+      });
+
+      Object.defineProperty(event, "touches", {
+        configurable: true,
+        value:
+          type === "touchend" || type === "touchcancel"
+            ? []
+            : [{ clientY }]
+      });
+      Object.defineProperty(event, "changedTouches", {
+        configurable: true,
+        value: [{ clientY }]
+      });
+
+      node.dispatchEvent(event);
+    };
+
+    node.scrollTop = 0;
+    dispatchTouch("touchstart", 140);
+    dispatchTouch("touchmove", 360);
+    dispatchTouch("touchend", 360);
+  });
 }
 
 export async function mountApp(page: Page, options: HypecastMockOptions = {}): Promise<void> {
@@ -99,10 +130,13 @@ export async function mountApp(page: Page, options: HypecastMockOptions = {}): P
       accountIdentifier: defaultWallet.address.toLowerCase(),
       installationId: "installation-123"
     };
+    let feedLoadCount = 0;
 
     window.__HYPECAST_TEST_API__ = {
       isStandalone: input.isStandalone,
       loadFeedSnapshot: async (options) => {
+        feedLoadCount += 1;
+
         if (input.feed?.delayMs) {
           await sleep(input.feed.delayMs);
         }
@@ -125,7 +159,11 @@ export async function mountApp(page: Page, options: HypecastMockOptions = {}): P
           throw new Error(input.feed.error);
         }
 
-        const snapshot = input.feed?.snapshot;
+        const snapshotSequence = input.feed?.snapshots;
+        const snapshot =
+          snapshotSequence && snapshotSequence.length > 0
+            ? snapshotSequence[Math.min(feedLoadCount - 1, snapshotSequence.length - 1)]
+            : input.feed?.snapshot;
 
         if (!snapshot) {
           throw new Error("No feed snapshot mock configured.");
