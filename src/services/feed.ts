@@ -98,25 +98,79 @@ function extractNextData(html: string): unknown {
 }
 
 function safeHostname(url: string | undefined): string | undefined {
-  if (!url) {
+  const normalizedUrl = normalizeUrl(url);
+
+  if (!normalizedUrl) {
     return undefined;
   }
 
   try {
-    return new URL(url).hostname.replace(/^www\./, "");
+    return new URL(normalizedUrl).hostname.replace(/^www\./, "");
   } catch {
     return undefined;
   }
 }
 
-function looksLikeImageUrl(url: string | undefined): boolean {
+function normalizeUrl(url: string | undefined): string | undefined {
   if (!url) {
+    return undefined;
+  }
+
+  if (url.startsWith("//")) {
+    return `https:${url}`;
+  }
+
+  return url;
+}
+
+function looksLikeImageUrl(url: string | undefined): boolean {
+  const normalizedUrl = normalizeUrl(url);
+
+  if (!normalizedUrl) {
     return false;
   }
 
   try {
-    const pathname = new URL(url).pathname;
+    const pathname = new URL(normalizedUrl).pathname;
     return /\.(avif|gif|jpe?g|png|svg|webp)$/i.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+function looksLikeImageContentType(contentType: unknown): boolean {
+  return typeof contentType === "string" && contentType.toLowerCase().startsWith("image/");
+}
+
+function isLikelyPreviewImage(url: string | undefined): boolean {
+  const normalizedUrl = normalizeUrl(url);
+
+  if (!normalizedUrl) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(normalizedUrl);
+    const pathname = parsed.pathname.toLowerCase();
+    const hostname = parsed.hostname.toLowerCase();
+
+    if (pathname.endsWith(".ico")) {
+      return false;
+    }
+
+    if (pathname.includes("/favicon")) {
+      return false;
+    }
+
+    if (pathname.includes("/emoji/")) {
+      return false;
+    }
+
+    if (hostname.includes("twimg.com") && pathname.includes("/emoji/")) {
+      return false;
+    }
+
+    return true;
   } catch {
     return false;
   }
@@ -125,11 +179,13 @@ function looksLikeImageUrl(url: string | undefined): boolean {
 function normalizePublicMedia(cast: UntrustedRecord): FeedCast["media"] {
   const imageEmbed = cast?.embeds?.images?.[0];
   const urlEmbed = cast?.embeds?.urls?.[0]?.openGraph;
+  const imageSrc = normalizeUrl(imageEmbed?.media?.staticRaster ?? imageEmbed?.url);
+  const ogImage = normalizeUrl(urlEmbed?.image);
 
-  if (imageEmbed?.media?.staticRaster || imageEmbed?.url) {
+  if (imageSrc) {
     return {
       kind: "image",
-      src: imageEmbed.media?.staticRaster ?? imageEmbed.url,
+      src: imageSrc,
       alt: imageEmbed.alt ?? imageEmbed.openGraph?.title ?? "Cast image",
       eyebrow: cast?.channel?.name,
       title: cast?.author?.displayName ?? cast?.author?.username ?? "Farcaster",
@@ -137,10 +193,10 @@ function normalizePublicMedia(cast: UntrustedRecord): FeedCast["media"] {
     };
   }
 
-  if (urlEmbed?.image) {
+  if (ogImage && isLikelyPreviewImage(ogImage)) {
     return {
       kind: "image",
-      src: urlEmbed.image,
+      src: ogImage,
       alt: urlEmbed.title ?? "Linked preview",
       eyebrow: urlEmbed.domain ?? cast?.channel?.name,
       title: sanitizeText(urlEmbed.title || urlEmbed.domain || "Linked preview"),
@@ -290,61 +346,120 @@ async function fetchBundledSnapshot(): Promise<FeedSnapshot> {
 }
 
 function normalizeNeynarMedia(cast: UntrustedRecord): FeedCast["media"] {
-  const embed = Array.isArray(cast.embeds) ? cast.embeds.find(Boolean) : undefined;
+  const embeds = Array.isArray(cast.embeds) ? cast.embeds.filter(Boolean) : [];
 
-  if (!embed) {
-    return undefined;
-  }
+  const rankedMedia = embeds
+    .map((embed) => normalizeNeynarEmbedMedia(embed as UntrustedRecord, cast))
+    .filter((candidate): candidate is { media: FeedCast["media"]; score: number } => Boolean(candidate?.media))
+    .sort((left, right) => right.score - left.score);
 
+  return rankedMedia[0]?.media;
+}
+
+function normalizeNeynarEmbedMedia(
+  embed: UntrustedRecord,
+  cast: UntrustedRecord
+): { media: FeedCast["media"]; score: number } | null {
   if (embed.cast?.author) {
     const embeddedTitle =
       embed.cast.author.display_name ?? embed.cast.author.username ?? `fid ${embed.cast.author.fid ?? "cast"}`;
     const embeddedHandle = embed.cast.author.username ? `@${embed.cast.author.username}` : "embedded cast";
 
     return {
-      kind: "link",
-      eyebrow: embeddedHandle,
-      title: embeddedTitle,
-      description: sanitizeText(embed.cast.text) || "Embedded cast"
+      score: 1,
+      media: {
+        kind: "link",
+        eyebrow: embeddedHandle,
+        title: embeddedTitle,
+        description: sanitizeText(embed.cast.text) || "Embedded cast"
+      }
     };
   }
 
-  const embedUrl = typeof embed.url === "string" ? embed.url : undefined;
-  const metadata = embed.metadata;
-  const frameImage =
-    typeof metadata?.frame?.image === "string"
-      ? metadata.frame.image
-      : typeof metadata?.html?.fcFrame?.imageUrl === "string"
-        ? metadata.html.fcFrame.imageUrl
-        : undefined;
-  const ogImage =
-    typeof metadata?.html?.ogImage?.[0]?.url === "string" ? metadata.html.ogImage[0].url : undefined;
-  const title = sanitizeText(metadata?.frame?.title || metadata?.html?.ogTitle || embedUrl || "Linked preview");
-  const description = sanitizeText(metadata?.html?.ogDescription || embedUrl || cast.text || title);
+  const embedUrl = normalizeUrl(typeof embed.url === "string" ? embed.url : undefined);
+  const metadata = embed.metadata ?? {};
+  const html = metadata.html ?? {};
+  const frame = metadata.frame ?? {};
+  const directImage = looksLikeImageContentType(metadata.content_type) || Boolean(metadata.image);
+  const frameImage = normalizeUrl(
+    typeof frame.image === "string"
+      ? frame.image
+      : typeof html?.fcFrame?.imageUrl === "string"
+        ? html.fcFrame.imageUrl
+        : typeof html?.fcFrame?.ogImageUrl === "string"
+          ? html.fcFrame.ogImageUrl
+          : typeof frame?.manifest?.frame?.og_image_url === "string"
+            ? frame.manifest.frame.og_image_url
+            : typeof frame?.manifest?.frame?.hero_image_url === "string"
+              ? frame.manifest.frame.hero_image_url
+              : typeof frame?.manifest?.miniapp?.og_image_url === "string"
+                ? frame.manifest.miniapp.og_image_url
+                : typeof frame?.manifest?.miniapp?.hero_image_url === "string"
+                  ? frame.manifest.miniapp.hero_image_url
+                  : undefined
+  );
+  const ogImage = normalizeUrl(
+    typeof html?.ogImage?.[0]?.url === "string"
+      ? html.ogImage[0].url
+      : typeof html?.oembed?.thumbnail_url === "string"
+        ? html.oembed.thumbnail_url
+        : undefined
+  );
+  const title = sanitizeText(
+    frame.title ||
+      html?.fcFrame?.ogTitle ||
+      html?.ogTitle ||
+      html?.oembed?.title ||
+      html?.oembed?.author_name ||
+      embedUrl ||
+      "Linked preview"
+  );
+  const description = sanitizeText(
+    html?.ogDescription ||
+      html?.fcFrame?.ogDescription ||
+      cast.text ||
+      html?.oembed?.author_name ||
+      embedUrl ||
+      title
+  );
   const eyebrow = safeHostname(embedUrl);
-  const imageSrc = frameImage ?? ogImage ?? (looksLikeImageUrl(embedUrl) ? embedUrl : undefined);
+  const imageSrc = directImage
+    ? embedUrl
+    : frameImage && isLikelyPreviewImage(frameImage)
+      ? frameImage
+      : ogImage && isLikelyPreviewImage(ogImage)
+        ? ogImage
+        : looksLikeImageUrl(embedUrl)
+          ? embedUrl
+          : undefined;
 
   if (imageSrc) {
     return {
-      kind: "image",
-      src: imageSrc,
-      alt: title,
-      eyebrow,
-      title,
-      description
+      score: directImage ? 4 : 3,
+      media: {
+        kind: "image",
+        src: imageSrc,
+        alt: title,
+        eyebrow,
+        title,
+        description
+      }
     };
   }
 
   if (embedUrl) {
     return {
-      kind: "link",
-      eyebrow,
-      title,
-      description
+      score: 2,
+      media: {
+        kind: "link",
+        eyebrow,
+        title,
+        description
+      }
     };
   }
 
-  return undefined;
+  return null;
 }
 
 function normalizeNeynarCast(cast: UntrustedRecord): FeedCast | null {

@@ -749,7 +749,12 @@ function renderFeedMedia(media: FeedCast["media"]): string {
   if (media.kind === "image" && media.src) {
     return `
       <div class="media-card media-image">
-        <img src="${escapeAttribute(media.src)}" alt="${escapeAttribute(media.alt ?? media.title)}" />
+        <img
+          src="${escapeAttribute(media.src)}"
+          alt="${escapeAttribute(media.alt ?? media.title)}"
+          loading="lazy"
+          referrerpolicy="no-referrer"
+        />
         <div class="media-copy">
           ${media.eyebrow ? `<p class="media-eyebrow">${escapeHtml(media.eyebrow)}</p>` : ""}
           <strong>${escapeHtml(media.title)}</strong>

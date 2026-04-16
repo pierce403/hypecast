@@ -136,6 +136,7 @@ Notes:
 - Runtime feed loading now attempts live Farcaster SSR profile data via CORS-friendly mirrors (`allorigins`, `r.jina.ai`) before falling back to the committed snapshot; successful responses are cached in `localStorage` under `hypecast:feed-snapshot` for a short TTL.
 - Personalized feed loading uses the signed-in Farcaster `fid` plus `hypecast:neynar-api-key` from `localStorage` to request Neynar's following feed directly from the browser. If that request fails, the app falls back to the last matching cached personalized snapshot when available.
 - The working built-in Neynar fallback was verified against the live following-feed endpoint on April 16, 2026. An older key still referenced in `../converge.cv/AGENTS.md` is dead and should not be copied forward.
+- Neynar image embeds often arrive as `metadata.content_type: image/*` plus `metadata.image`, even when the URL has no file extension. The media normalizer must treat those as images and should rank direct image/OG/frame previews above embedded-cast fallbacks.
 - Playwright now runs against both `mobile-chromium` and `desktop-chromium`. If layout changes are viewport-specific, keep assertions for both form factors green.
 
 ## Rapport & Reflection

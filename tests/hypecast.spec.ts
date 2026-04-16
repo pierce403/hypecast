@@ -93,6 +93,18 @@ test("renders the mobile shell, filters snapshot tabs, and opens overlays", asyn
   ).toHaveCount(0);
 });
 
+test("renders image and opengraph-style preview cards in the feed", async ({ page }) => {
+  const main = shellMain(page);
+
+  await mountApp(page);
+
+  await expect(main.getByText("Snap Kitchen Sink")).toBeVisible();
+
+  await page.getByRole("tab", { name: "base" }).click();
+  await expect(main.locator('.media-image img[alt="Base preview"]')).toBeVisible();
+  await expect(main.getByText("Builder Week")).toBeVisible();
+});
+
 test("frames the shell cleanly on desktop", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chromium", "Desktop-only layout assertion.");
 
