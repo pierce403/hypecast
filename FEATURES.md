@@ -33,6 +33,19 @@
   - [x] Signed-in users can load a personalized following feed from their own `fid` without manual key entry
   - [x] Wide desktop viewports keep the shell centered and framed cleanly
 
+### Client Security Model
+- **Stability**: in-progress
+- **Description**: The static client now documents its security posture, hardens remote URL handling, and adds automated regression coverage around trust-boundary code paths.
+- **Properties**:
+  - `SECURITY.md` defines supported versions, reporting expectations, and the browser-centric trust model
+  - Shared security helpers escape untrusted text and allowlist remote `href` and `src` protocols before render
+  - The app ships a restrictive meta CSP plus `Referrer-Policy` from `index.html`
+  - Vitest covers the protocol allowlist and feed preview normalization logic
+- **Test Criteria**:
+  - [x] Unsafe `javascript:`, `data:text/html`, and `file:` links are rejected by the shared sanitizers
+  - [x] Remote image URLs are normalized and filtered before entering renderable feed state
+  - [x] `npm run test:unit` passes for the security helper and feed normalization suite
+
 ### Farcaster Sign-In And Profile Binding
 - **Stability**: in-progress
 - **Description**: Users can authenticate through the Farcaster relay flow, bind profile metadata into the client shell, restore that profile after reloads, and use the authenticated `fid` to unlock personalized feed loading.

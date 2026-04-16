@@ -1,4 +1,9 @@
 import { getHypecastTestApi } from "../test-support";
+import {
+  normalizePotentialUrl,
+  sanitizeImageUrl,
+  sanitizeLinkUrl
+} from "./security";
 import type { FeedCast, FeedLoadOptions, FeedSnapshot, FeedSource } from "../types";
 
 const FEED_SNAPSHOT_URL = `${import.meta.env.BASE_URL}farcaster-feed.json`;
@@ -112,15 +117,7 @@ function safeHostname(url: string | undefined): string | undefined {
 }
 
 function normalizeUrl(url: string | undefined): string | undefined {
-  if (!url) {
-    return undefined;
-  }
-
-  if (url.startsWith("//")) {
-    return `https:${url}`;
-  }
-
-  return url;
+  return normalizePotentialUrl(url);
 }
 
 function looksLikeImageUrl(url: string | undefined): boolean {
@@ -179,8 +176,8 @@ function isLikelyPreviewImage(url: string | undefined): boolean {
 function normalizePublicMedia(cast: UntrustedRecord): FeedCast["media"] {
   const imageEmbed = cast?.embeds?.images?.[0];
   const urlEmbed = cast?.embeds?.urls?.[0]?.openGraph;
-  const imageSrc = normalizeUrl(imageEmbed?.media?.staticRaster ?? imageEmbed?.url);
-  const ogImage = normalizeUrl(urlEmbed?.image);
+  const imageSrc = sanitizeImageUrl(imageEmbed?.media?.staticRaster ?? imageEmbed?.url);
+  const ogImage = sanitizeImageUrl(urlEmbed?.image);
 
   if (imageSrc) {
     return {
@@ -235,12 +232,12 @@ function normalizePublicCast(source: FeedSource, cast: UntrustedRecord): FeedCas
     authorName: cast.author?.displayName ?? source.displayName,
     authorHandle: cast.author?.username ?? source.username,
     authorInitial: firstInitial(cast.author?.displayName, cast.author?.username, source.displayName),
-    authorAvatarUrl: cast.author?.pfp?.url ?? source.pfpUrl,
+    authorAvatarUrl: sanitizeImageUrl(cast.author?.pfp?.url ?? source.pfpUrl),
     accentClass: source.accentClass,
     timestamp,
     contextLabel: cast.channel?.name ? `in ${cast.channel.name}` : `via ${source.label}`,
     text,
-    permalink: typeof cast?.permalink === "string" ? cast.permalink : undefined,
+    permalink: typeof cast?.permalink === "string" ? sanitizeLinkUrl(cast.permalink) : undefined,
     replies: typeof cast.replies?.count === "number" ? cast.replies.count : undefined,
     recasts: typeof cast.recasts?.count === "number" ? cast.recasts.count : undefined,
     reactions: typeof cast.reactions?.count === "number" ? cast.reactions.count : undefined,
@@ -295,7 +292,7 @@ async function fetchRealtimeSource(sourceConfig: {
     label: sourceConfig.label,
     username: user.username ?? sourceConfig.username,
     displayName: user.displayName ?? sourceConfig.label,
-    pfpUrl: user.pfp?.url,
+    pfpUrl: sanitizeImageUrl(user.pfp?.url),
     bio: user.profile?.bio?.text,
     accentClass: sourceConfig.accentClass
   };
@@ -376,12 +373,15 @@ function normalizeNeynarEmbedMedia(
     };
   }
 
-  const embedUrl = normalizeUrl(typeof embed.url === "string" ? embed.url : undefined);
+  const embedUrl = sanitizeLinkUrl(typeof embed.url === "string" ? embed.url : undefined);
   const metadata = embed.metadata ?? {};
   const html = metadata.html ?? {};
   const frame = metadata.frame ?? {};
   const directImage = looksLikeImageContentType(metadata.content_type) || Boolean(metadata.image);
-  const frameImage = normalizeUrl(
+  const directImageSrc = sanitizeImageUrl(
+    typeof metadata.image === "string" ? metadata.image : embedUrl
+  );
+  const frameImage = sanitizeImageUrl(
     typeof frame.image === "string"
       ? frame.image
       : typeof html?.fcFrame?.imageUrl === "string"
@@ -396,9 +396,9 @@ function normalizeNeynarEmbedMedia(
                 ? frame.manifest.miniapp.og_image_url
                 : typeof frame?.manifest?.miniapp?.hero_image_url === "string"
                   ? frame.manifest.miniapp.hero_image_url
-                  : undefined
+                : undefined
   );
-  const ogImage = normalizeUrl(
+  const ogImage = sanitizeImageUrl(
     typeof html?.ogImage?.[0]?.url === "string"
       ? html.ogImage[0].url
       : typeof html?.oembed?.thumbnail_url === "string"
@@ -423,14 +423,15 @@ function normalizeNeynarEmbedMedia(
       title
   );
   const eyebrow = safeHostname(embedUrl);
-  const imageSrc = directImage
-    ? embedUrl
+  const fallbackEmbedImage = looksLikeImageUrl(embedUrl) ? sanitizeImageUrl(embedUrl) : undefined;
+  const imageSrc = directImage && directImageSrc
+    ? directImageSrc
     : frameImage && isLikelyPreviewImage(frameImage)
       ? frameImage
       : ogImage && isLikelyPreviewImage(ogImage)
         ? ogImage
-        : looksLikeImageUrl(embedUrl)
-          ? embedUrl
+        : fallbackEmbedImage
+          ? fallbackEmbedImage
           : undefined;
 
   if (imageSrc) {
@@ -480,7 +481,7 @@ function normalizeNeynarCast(cast: UntrustedRecord): FeedCast | null {
     authorName: author.display_name ?? author.username ?? `fid ${author.fid ?? "unknown"}`,
     authorHandle: author.username ?? String(author.fid ?? "unknown"),
     authorInitial: firstInitial(author.display_name, author.username),
-    authorAvatarUrl: author.pfp_url,
+    authorAvatarUrl: sanitizeImageUrl(author.pfp_url),
     accentClass: "accent-live",
     timestamp,
     contextLabel: typeof channel.name === "string" ? `in ${channel.name}` : undefined,
@@ -645,3 +646,11 @@ export async function loadFeedSnapshot(options: FeedLoadOptions = {}): Promise<F
     return bundledSnapshot;
   }
 }
+
+export const __test__ = {
+  isLikelyPreviewImage,
+  looksLikeImageContentType,
+  normalizeNeynarEmbedMedia,
+  normalizeNeynarMedia,
+  normalizePublicMedia
+};

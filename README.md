@@ -15,6 +15,7 @@ Hypecast is a PWA-first Farcaster client scaffold built with vanilla TypeScript,
 npm install
 npm run dev
 npm run sync:feed
+npm run test:unit
 ```
 
 `npm run sync:feed` refreshes `public/farcaster-feed.json` from public Farcaster SSR profile pages so the home feed ships with real data on the same origin.
@@ -36,6 +37,12 @@ Copy `.env.example` to `.env` if you need custom settings.
 - To load your own following feed, sign in with Farcaster. Hypecast now ships with a working built-in Neynar key and requests Neynar's following feed for your saved `fid` directly from the browser.
 - The account sheet still accepts a browser-local Neynar override if you want to swap keys without rebuilding the app. If you save one, it is stored in `localStorage` on your device.
 - Because production is still a static GitHub Pages app, the long-term fix for secret management is still adding a backend or proxy for feed requests.
+- Untrusted remote URLs are allowlisted before they are rendered into `href` or `src`, and the repo now includes unit coverage for that policy plus feed preview selection.
+
+## Security
+
+- See [SECURITY.md](SECURITY.md) for the reporting process, supported versions, and the current client-side security model.
+- `npm run test:unit` covers the shared security helpers and feed media normalization logic.
 
 ## Deployment
 

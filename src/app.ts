@@ -12,6 +12,12 @@ import {
   loadStoredNeynarApiKey,
   saveStoredNeynarApiKey
 } from "./services/feed";
+import {
+  escapeAttribute,
+  escapeHtml,
+  sanitizeImageUrl,
+  sanitizeLinkUrl
+} from "./services/security";
 import { connectWallet, shortAddress, type WalletSession } from "./services/wallet";
 import { connectXmtp } from "./services/xmtp";
 import { getHypecastTestApi } from "./test-support";
@@ -177,7 +183,7 @@ function normalizeStoredMedia(value: unknown): FeedCast["media"] {
     kind: candidate.kind,
     title: candidate.title,
     description: candidate.description,
-    src: typeof candidate.src === "string" ? candidate.src : undefined,
+    src: typeof candidate.src === "string" ? sanitizeImageUrl(candidate.src) : undefined,
     alt: typeof candidate.alt === "string" ? candidate.alt : undefined,
     eyebrow: typeof candidate.eyebrow === "string" ? candidate.eyebrow : undefined
   };
@@ -221,12 +227,15 @@ function normalizeStoredCast(value: unknown): FeedCast | null {
         : candidate.authorName.toLowerCase().replaceAll(/\s+/g, ""),
     authorInitial: candidate.authorInitial,
     authorAvatarUrl:
-      typeof candidate.authorAvatarUrl === "string" ? candidate.authorAvatarUrl : undefined,
+      typeof candidate.authorAvatarUrl === "string"
+        ? sanitizeImageUrl(candidate.authorAvatarUrl)
+        : undefined,
     accentClass: typeof candidate.accentClass === "string" ? candidate.accentClass : undefined,
     timestamp,
     contextLabel: typeof candidate.contextLabel === "string" ? candidate.contextLabel : undefined,
     text: candidate.text,
-    permalink: typeof candidate.permalink === "string" ? candidate.permalink : undefined,
+    permalink:
+      typeof candidate.permalink === "string" ? sanitizeLinkUrl(candidate.permalink) : undefined,
     replies: typeof candidate.replies === "number" ? candidate.replies : undefined,
     recasts: typeof candidate.recasts === "number" ? candidate.recasts : undefined,
     reactions: typeof candidate.reactions === "number" ? candidate.reactions : undefined,
@@ -253,16 +262,6 @@ function saveStoredLocalCasts(casts: FeedCast[]): void {
   }
 
   saveStoredJson(STORAGE_KEYS.localCasts, casts);
-}
-
-function escapeHtml(value: string | number | null | undefined): string {
-  return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
-function escapeAttribute(value: string | number | null | undefined): string {
-  return escapeHtml(value)
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }
 
 function renderIcon(name: IconName): string {
@@ -579,8 +578,10 @@ function renderAvatar(
   imageClass: string,
   fallbackClass: string
 ): string {
-  if (profile?.pfpUrl) {
-    return `<img class="${imageClass}" src="${escapeAttribute(profile.pfpUrl)}" alt="${escapeAttribute(profileName(profile))}" />`;
+  const safeAvatarUrl = sanitizeImageUrl(profile?.pfpUrl);
+
+  if (safeAvatarUrl) {
+    return `<img class="${imageClass}" src="${escapeAttribute(safeAvatarUrl)}" alt="${escapeAttribute(profileName(profile))}" />`;
   }
 
   return `<span class="${fallbackClass}">${escapeHtml(profileInitial(profile))}</span>`;
@@ -746,11 +747,13 @@ function renderFeedMedia(media: FeedCast["media"]): string {
     return "";
   }
 
-  if (media.kind === "image" && media.src) {
+  const safeImageSrc = media.kind === "image" ? sanitizeImageUrl(media.src) : undefined;
+
+  if (media.kind === "image" && safeImageSrc) {
     return `
       <div class="media-card media-image">
         <img
-          src="${escapeAttribute(media.src)}"
+          src="${escapeAttribute(safeImageSrc)}"
           alt="${escapeAttribute(media.alt ?? media.title)}"
           loading="lazy"
           referrerpolicy="no-referrer"
@@ -764,7 +767,7 @@ function renderFeedMedia(media: FeedCast["media"]): string {
     `;
   }
 
-  if (media.kind === "link") {
+  if (media.kind === "link" || media.kind === "image") {
     return `
       <div class="media-card media-link">
         <div class="media-hero">
@@ -783,13 +786,16 @@ function renderFeedMedia(media: FeedCast["media"]): string {
 }
 
 function renderFeedCast(cast: FeedCast): string {
+  const safeAvatarUrl = sanitizeImageUrl(cast.authorAvatarUrl);
+  const safePermalink = sanitizeLinkUrl(cast.permalink);
+
   return `
     <article class="feed-card">
       <div class="feed-header">
         <div class="feed-avatar-wrap">
           ${
-            cast.authorAvatarUrl
-              ? `<img class="feed-avatar" src="${escapeAttribute(cast.authorAvatarUrl)}" alt="${escapeAttribute(cast.authorName)}" />`
+            safeAvatarUrl
+              ? `<img class="feed-avatar" src="${escapeAttribute(safeAvatarUrl)}" alt="${escapeAttribute(cast.authorName)}" />`
               : `<span class="feed-avatar feed-avatar-fallback ${escapeAttribute(cast.accentClass ?? "accent-live")}">${escapeHtml(
                   cast.authorInitial
                 )}</span>`
@@ -806,8 +812,8 @@ function renderFeedCast(cast: FeedCast): string {
           ${renderFeedMedia(cast.media)}
         </div>
         ${
-          cast.permalink
-            ? `<a class="feed-menu" href="${escapeAttribute(cast.permalink)}" target="_blank" rel="noreferrer" aria-label="Open cast">${renderIcon("more")}</a>`
+          safePermalink
+            ? `<a class="feed-menu" href="${escapeAttribute(safePermalink)}" target="_blank" rel="noreferrer" aria-label="Open cast">${renderIcon("more")}</a>`
             : `<span class="feed-menu" aria-hidden="true">${renderIcon("more")}</span>`
         }
       </div>
@@ -902,11 +908,11 @@ function getSearchResults(state: AppState, ui: UiState): SearchResult[] {
 
 function renderSearchResult(result: SearchResult): string {
   const attributes = result.timeline
-    ? `data-timeline="${result.timeline}"`
+    ? `data-timeline="${escapeAttribute(result.timeline)}"`
     : result.nav
-      ? `data-nav="${result.nav}"`
+      ? `data-nav="${escapeAttribute(result.nav)}"`
       : result.action
-        ? `data-action="${result.action}"`
+        ? `data-action="${escapeAttribute(result.action)}"`
         : "";
 
   return `
@@ -1250,20 +1256,25 @@ function renderFarcasterRelayCard(state: AppState): string {
     return "";
   }
 
+  const safeQrCodeDataUrl = sanitizeImageUrl(state.farcaster.qrCodeDataUrl, {
+    allowDataImage: true
+  });
+  const safeChannelUrl = sanitizeLinkUrl(state.farcaster.channelUrl);
+
   return `
     <div class="sheet-auth-card">
       <p class="support-copy farcaster-status-copy">${escapeHtml(describeFarcaster(state.farcaster))}</p>
       ${
-        state.farcaster.qrCodeDataUrl
+        safeQrCodeDataUrl
           ? `
             <div class="sheet-qr-card">
-              <img src="${escapeAttribute(state.farcaster.qrCodeDataUrl)}" alt="Farcaster sign-in QR code" />
+              <img src="${escapeAttribute(safeQrCodeDataUrl)}" alt="Farcaster sign-in QR code" />
               <div>
                 <p class="eyebrow-label">scan from your phone</p>
                 <p class="support-copy">Use Warpcast or another Farcaster wallet to complete the sign-in flow.</p>
                 ${
-                  state.farcaster.channelUrl
-                    ? `<a class="text-link" href="${escapeAttribute(state.farcaster.channelUrl)}" target="_blank" rel="noreferrer">Open deep link</a>`
+                  safeChannelUrl
+                    ? `<a class="text-link" href="${escapeAttribute(safeChannelUrl)}" target="_blank" rel="noreferrer">Open deep link</a>`
                     : ""
                 }
               </div>
@@ -1491,7 +1502,7 @@ function template(
                         <button
                           class="timeline-tab ${ui.activeTimeline === tab.id ? "is-active" : ""}"
                           type="button"
-                          data-timeline="${tab.id}"
+                          data-timeline="${escapeAttribute(tab.id)}"
                           role="tab"
                           aria-selected="${ui.activeTimeline === tab.id}"
                         >
@@ -1520,7 +1531,7 @@ function template(
                   <button
                     class="nav-button ${ui.activePane === item.id ? "is-active" : ""}"
                     type="button"
-                    data-nav="${item.id}"
+                    data-nav="${escapeAttribute(item.id)}"
                     aria-label="${escapeAttribute(item.label)}"
                   >
                     <span class="nav-icon-wrap">

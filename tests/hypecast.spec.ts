@@ -105,6 +105,55 @@ test("renders image and opengraph-style preview cards in the feed", async ({ pag
   await expect(main.getByText("Builder Week")).toBeVisible();
 });
 
+test("refuses to render unsafe remote feed URLs", async ({ page }) => {
+  const main = shellMain(page);
+
+  await mountApp(page, {
+    feed: {
+      snapshot: {
+        generatedAt: "2026-04-16T06:00:00.000Z",
+        mode: "public",
+        provider: "bundled",
+        sources: [
+          {
+            id: "following",
+            label: "following",
+            username: "following",
+            displayName: "Following"
+          }
+        ],
+        casts: [
+          {
+            id: "unsafe-1",
+            channel: "following",
+            authorName: "Unsafe Feed",
+            authorHandle: "unsafe",
+            authorInitial: "U",
+            authorAvatarUrl: "javascript:alert(1)",
+            accentClass: "accent-live",
+            timestamp: 1776320000000,
+            text: "This cast should not get executable URLs.",
+            permalink: "javascript:alert(2)",
+            media: {
+              kind: "image",
+              src: "javascript:alert(3)",
+              title: "Unsafe preview",
+              description: "Falls back to text-only media rendering."
+            }
+          }
+        ]
+      }
+    }
+  });
+
+  await expect(main.getByText("This cast should not get executable URLs.")).toBeVisible();
+  await expect(main.locator(".feed-card img.feed-avatar")).toHaveCount(0);
+  await expect(main.locator(".feed-card .feed-avatar-fallback")).toBeVisible();
+  await expect(main.locator(".feed-card .media-image img")).toHaveCount(0);
+  await expect(main.getByText("Unsafe preview")).toBeVisible();
+  await expect(main.locator('.feed-card .feed-menu[href^="javascript:"]')).toHaveCount(0);
+});
+
 test("frames the shell cleanly on desktop", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chromium", "Desktop-only layout assertion.");
 
@@ -233,7 +282,9 @@ test("signs in with Farcaster, shows the pending QR state, and binds the profile
 
   await expect(page.getByAltText("Farcaster sign-in QR code")).toBeVisible();
   await expect(page.getByRole("link", { name: "Open deep link" })).toBeVisible();
-  await expect(overlay.getByText(/Scan the QR code or open the deep link/i)).toBeVisible();
+  await expect(
+    overlay.getByText("Use Warpcast or another Farcaster wallet to complete the sign-in flow.")
+  ).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "Ada Lovelace" })).toBeVisible();
 
   await expect(overlay.getByText("@ada", { exact: true })).toBeVisible();

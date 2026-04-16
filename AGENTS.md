@@ -36,6 +36,7 @@ npm install
 npm run dev
 npm run dev -- --host 0.0.0.0
 npm run sync:feed
+npm run test:unit
 npm run typecheck
 npm run build
 npx playwright install chromium
@@ -49,6 +50,7 @@ Notes:
 - `npm run build` runs `tsc --noEmit && vite build`.
 - `npm run dev -- --host 0.0.0.0` is useful for testing Farcaster sign-in from another device on the same network.
 - `npm run sync:feed` refreshes `public/farcaster-feed.json` from the configured Farcaster SSR profile sources.
+- `npm run test:unit` runs the Vitest suite for shared security helpers and feed normalization.
 - `npm run test:e2e` runs the Playwright suite against a local Vite server on `127.0.0.1:4173`.
 - After every push to `main`, check the latest `deploy-pages.yml` run and wait for it to finish with `gh run watch <run-id> --exit-status`.
 - Install the Playwright browser runtime with `npx playwright install chromium` after adding or refreshing the dependency.
@@ -60,6 +62,7 @@ Notes:
 - `src/app.ts`: top-level DOM rendering and interaction/state wiring
 - `src/config.ts`: runtime config parsing for RPC and XMTP environment
 - `src/services/feed.ts`: loads the public fallback feed plus the personalized Neynar following feed when a signed-in `fid` and stored API key are available
+- `src/services/security.ts`: shared escaping and protocol-allowlist helpers for untrusted text and remote URLs
 - `src/test-support.ts`: browser-only test seam for Playwright mocks of standalone mode, wallet, Farcaster, and XMTP
 - `src/services/wallet.ts`: injected EVM wallet connection
 - `src/services/farcaster.ts`: Farcaster auth channel creation, QR generation, and verification
@@ -85,6 +88,7 @@ Notes:
 - Search, draft composer state, locally published casts, and the persisted Farcaster profile currently live in `src/app.ts` via `localStorage`. If you change those flows, update the storage behavior and the E2E coverage together.
 - Keep the bottom nav outside the `.shell-content` scroll container. The intended behavior is a pinned shell footer while only the feed/pane content scrolls.
 - Keep the Home timeline free of synthetic placeholder cards. Account/status controls belong in panes or overlays; the feed itself should start with real snapshot or local casts.
+- Any untrusted remote URL that reaches `href` or `src` should go through `src/services/security.ts` first. Do not interpolate remote URLs directly into markup.
 
 ## Dependencies That Matter
 
@@ -108,6 +112,7 @@ Notes:
 - Keep `.bottom-nav` sticky with `bottom: 0` and `margin-top: auto` so it stays anchored to the phone shell edge while only `.shell-content` scrolls.
 - The personalized following feed currently uses Neynar from the browser with a built-in default client key, and optional browser-local overrides stored in `localStorage`. That is the practical Pages-compatible path today, but it is not the long-term secret-management model.
 - Hypecast now ships with the verified Converge Neynar client key as the built-in default. The account-sheet field is a browser-local override, not a required setup step.
+- `index.html` now carries the repo's meta CSP and referrer policy. If new browser capabilities need extra origins or worker behavior, update the policy deliberately instead of loosening it blindly.
 
 ## Deployment Notes
 
@@ -128,6 +133,7 @@ Notes:
 - `FEATURES.md` lives at the repo root and follows the features.md structure. Use `stable`, `in-progress`, and `planned`, and keep properties plus test criteria concrete.
 - If the visual shell changes significantly, keep `index.html` and `vite.config.ts` theme colors aligned with the active app chrome so installed PWA chrome does not drift.
 - Prefer extending `src/test-support.ts` for Playwright integration mocks instead of stubbing production modules ad hoc in tests.
+- Keep pure trust-boundary logic testable from Vitest. The current unit-test surface lives in `src/services/security.test.ts` and `src/services/feed.test.ts`.
 - The Playwright config targets a mobile Chromium profile and blocks service workers to keep the shell tests deterministic.
 - The app rerenders the shell from `root.innerHTML`, so any live text inputs added to overlays need explicit focus restoration after render, or typing/search will break.
 - Playwright defaults now include a mocked feed snapshot; if you change timeline tabs or feed copy, update `tests/feed-fixture.ts` and the corresponding E2E assertions together.
