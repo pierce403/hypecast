@@ -53,6 +53,30 @@ function overlaySheet(page: Page) {
   return page.locator(".overlay-sheet");
 }
 
+async function mockInlineVideoPlayback(page: Page) {
+  await page.evaluate(() => {
+    const playingVideos = new WeakSet<HTMLMediaElement>();
+
+    Object.defineProperty(HTMLMediaElement.prototype, "paused", {
+      configurable: true,
+      get() {
+        return !playingVideos.has(this);
+      }
+    });
+
+    HTMLMediaElement.prototype.play = function () {
+      playingVideos.add(this);
+      this.dispatchEvent(new Event("play"));
+      return Promise.resolve();
+    };
+
+    HTMLMediaElement.prototype.pause = function () {
+      playingVideos.delete(this);
+      this.dispatchEvent(new Event("pause"));
+    };
+  });
+}
+
 test("renders the mobile shell, filters snapshot tabs, and opens overlays", async ({ page }) => {
   const nav = primaryNav(page);
   const main = shellMain(page);
@@ -117,7 +141,21 @@ test("renders clickable media cards, plain attachments, and download controls", 
 
   await page.getByRole("tab", { name: "v" }).click();
   await expect(main.locator('.media-video video')).toBeVisible();
+  await expect(main.getByRole("button", { name: "Play video inline" })).toBeVisible();
   await expect(main.getByRole("button", { name: "Download video" })).toBeVisible();
+});
+
+test("plays video inline from the feed card", async ({ page }) => {
+  const main = shellMain(page);
+
+  await mountApp(page);
+  await mockInlineVideoPlayback(page);
+
+  await page.getByRole("tab", { name: "v" }).click();
+  await main.getByRole("button", { name: "Play video inline" }).click();
+
+  await expect(main.locator(".media-video-player")).toHaveClass(/is-playing/);
+  await expect(main.getByRole("button", { name: "Pause inline video" })).toHaveText("Pause");
 });
 
 test("reply, recast, and like buttons update cast state", async ({ page }) => {

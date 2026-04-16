@@ -820,6 +820,42 @@ code {
   background: #111114;
 }
 
+.media-video-player {
+  position: relative;
+}
+
+.media-video-toggle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(8, 8, 10, 0.82);
+  color: var(--text);
+  transform: translate(-50%, -50%);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    background 180ms ease;
+}
+
+.media-video-player.is-playing .media-video-toggle {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, calc(-50% + 10px));
+}
+
+.media-video-player.is-loading .media-video-toggle {
+  pointer-events: none;
+}
+
+.media-video-toggle:disabled {
+  cursor: progress;
+}
+
 .media-hero,
 .sketch-surface {
   display: grid;

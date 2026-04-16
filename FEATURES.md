@@ -27,6 +27,7 @@
   - Search and composer affordances open in-app overlays that reserve the intended interaction pattern
   - Settings now exposes an About view with the exact build id and build time running in the shell
   - Link preview cards are clickable, while direct image/video attachments expose explicit download controls
+  - Feed video cards can start playback inline without sending the user out to the linked source page
   - Plain image/video attachments can render without redundant title/source captions
   - Pulling down from the top of the feed triggers a fresh snapshot request without moving the pinned bottom rail
   - Reply, recast, and like controls now update local cast state directly inside the shell
@@ -39,6 +40,7 @@
   - [x] Wide desktop viewports keep the shell centered and framed cleanly
   - [x] Settings shows a non-empty build id and build time for the current bundle
   - [x] Link previews are actionable and image/video cards expose media downloads
+  - [x] Video cards expose an inline play control inside the feed
   - [x] Pulling down at scroll-top refreshes the feed snapshot
   - [x] Reply, recast, and like buttons mutate local shell state and counts
 

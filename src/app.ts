@@ -19,6 +19,7 @@ import {
   sanitizeLinkUrl,
   sanitizeVideoUrl
 } from "./services/security";
+import { destroyInlineVideoSources, ensureInlineVideoSource } from "./services/video";
 import { connectWallet, shortAddress, type WalletSession } from "./services/wallet";
 import { connectXmtp } from "./services/xmtp";
 import { getHypecastTestApi } from "./test-support";
@@ -988,6 +989,19 @@ function renderMediaDownloadButton(label: string, url: string, fileName: string)
   `;
 }
 
+function renderInlineVideoToggleButton(): string {
+  return `
+    <button
+      class="media-video-toggle"
+      type="button"
+      data-action="toggle-inline-video"
+      aria-label="Play video inline"
+    >
+      Play inline
+    </button>
+  `;
+}
+
 function inferMediaDownloadFileName(url: string, kind: "image" | "video"): string {
   const fallbackExtension = kind === "video" ? "mp4" : "jpg";
   const fallbackName = `hypecast-${kind}.${fallbackExtension}`;
@@ -1147,14 +1161,19 @@ function renderFeedMedia(media: FeedCast["media"]): string {
   if (media.kind === "video" && safeVideoSrc) {
     return `
       <div class="media-card media-video ${shouldShowDetails ? "has-details" : "is-attachment"}">
-        <video
-          controls
-          playsinline
-          preload="metadata"
-          ${safePosterSrc ? `poster="${escapeAttribute(safePosterSrc)}"` : ""}
-        >
-          <source src="${escapeAttribute(safeVideoSrc)}" />
-        </video>
+        <div class="media-video-player" data-inline-video-player data-video-state="idle">
+          <video
+            controls
+            playsinline
+            webkit-playsinline="true"
+            preload="metadata"
+            referrerpolicy="no-referrer"
+            data-video-src="${escapeAttribute(safeVideoSrc)}"
+            data-video-href="${escapeAttribute(safeHref ?? safeVideoSrc)}"
+            ${safePosterSrc ? `poster="${escapeAttribute(safePosterSrc)}"` : ""}
+          ></video>
+          ${renderInlineVideoToggleButton()}
+        </div>
         ${
           shouldShowDetails
             ? renderMediaDetails(media)
@@ -2120,8 +2139,13 @@ export function createApp(root: HTMLDivElement): void {
   };
 
   const render = (focusTarget?: FocusTarget) => {
+    destroyInlineVideoSources(root);
     root.innerHTML = template(state, ui);
     syncPullToRefreshUi();
+    root.querySelectorAll<HTMLVideoElement>("video[data-video-src]").forEach((video) => {
+      syncInlineVideoPlayerUi(video);
+      void ensureInlineVideoSource(video);
+    });
 
     if (!focusTarget) {
       return;
@@ -2162,6 +2186,60 @@ export function createApp(root: HTMLDivElement): void {
 
   const clearReplyTarget = () => {
     ui.replyTargetCastId = undefined;
+  };
+
+  const syncInlineVideoPlayerUi = (
+    video: HTMLVideoElement,
+    stateOverride: "idle" | "loading" | "playing" = !video.paused && !video.ended ? "playing" : "idle"
+  ) => {
+    const player = video.closest<HTMLElement>("[data-inline-video-player]");
+    const toggle = player?.querySelector<HTMLButtonElement>('[data-action="toggle-inline-video"]');
+
+    if (!player || !toggle) {
+      return;
+    }
+
+    const nextState = stateOverride;
+    const buttonLabel =
+      nextState === "loading" ? "Loading..." : nextState === "playing" ? "Pause" : "Play inline";
+    const ariaLabel =
+      nextState === "playing"
+        ? "Pause inline video"
+        : nextState === "loading"
+          ? "Loading inline video"
+          : "Play video inline";
+
+    player.dataset.videoState = nextState;
+    player.classList.toggle("is-loading", nextState === "loading");
+    player.classList.toggle("is-playing", nextState === "playing");
+    toggle.textContent = buttonLabel;
+    toggle.setAttribute("aria-label", ariaLabel);
+    toggle.disabled = nextState === "loading";
+  };
+
+  const handleInlineVideoToggle = async (target: HTMLElement) => {
+    const player = target.closest<HTMLElement>("[data-inline-video-player]");
+    const video = player?.querySelector<HTMLVideoElement>("video[data-video-src]");
+
+    if (!video) {
+      return;
+    }
+
+    if (!video.paused && !video.ended) {
+      video.pause();
+      syncInlineVideoPlayerUi(video, "idle");
+      return;
+    }
+
+    syncInlineVideoPlayerUi(video, "loading");
+
+    try {
+      await ensureInlineVideoSource(video);
+      await video.play();
+      syncInlineVideoPlayerUi(video, "playing");
+    } catch {
+      syncInlineVideoPlayerUi(video, "idle");
+    }
   };
 
   const toggleFeedInteraction = (castId: string, key: keyof FeedInteractionState) => {
@@ -2517,6 +2595,56 @@ export function createApp(root: HTMLDivElement): void {
     syncPullToRefreshUi();
   });
 
+  root.addEventListener(
+    "play",
+    (event) => {
+      if (event.target instanceof HTMLVideoElement && event.target.matches("video[data-video-src]")) {
+        syncInlineVideoPlayerUi(event.target, "playing");
+      }
+    },
+    true
+  );
+
+  root.addEventListener(
+    "pause",
+    (event) => {
+      if (event.target instanceof HTMLVideoElement && event.target.matches("video[data-video-src]")) {
+        syncInlineVideoPlayerUi(event.target, "idle");
+      }
+    },
+    true
+  );
+
+  root.addEventListener(
+    "ended",
+    (event) => {
+      if (event.target instanceof HTMLVideoElement && event.target.matches("video[data-video-src]")) {
+        syncInlineVideoPlayerUi(event.target, "idle");
+      }
+    },
+    true
+  );
+
+  root.addEventListener(
+    "waiting",
+    (event) => {
+      if (event.target instanceof HTMLVideoElement && event.target.matches("video[data-video-src]")) {
+        syncInlineVideoPlayerUi(event.target, "loading");
+      }
+    },
+    true
+  );
+
+  root.addEventListener(
+    "canplay",
+    (event) => {
+      if (event.target instanceof HTMLVideoElement && event.target.matches("video[data-video-src]")) {
+        syncInlineVideoPlayerUi(event.target);
+      }
+    },
+    true
+  );
+
   root.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) {
       return;
@@ -2558,6 +2686,9 @@ export function createApp(root: HTMLDivElement): void {
     }
 
     switch (action) {
+      case "toggle-inline-video":
+        void handleInlineVideoToggle(target);
+        break;
       case "close-overlay":
         ui.overlay = "none";
         render();

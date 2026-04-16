@@ -97,6 +97,7 @@ Notes:
 - `vite@^7.3.2`
 - `vite-plugin-pwa@^1.2.0`
 - `typescript@^6.0.2`
+- `hls.js@^1.6.13`
 - `viem@^2.47.18`
 - `@farcaster/auth-client@^0.7.1`
 - `@xmtp/browser-sdk@^7.0.0`
@@ -146,6 +147,8 @@ Notes:
 - Personalized feed loading uses the signed-in Farcaster `fid` plus `hypecast:neynar-api-key` from `localStorage` to request Neynar's following feed directly from the browser. If that request fails, the app falls back to the last matching cached personalized snapshot when available.
 - The working built-in Neynar fallback was verified against the live following-feed endpoint on April 16, 2026. An older key still referenced in `../converge.cv/AGENTS.md` is dead and should not be copied forward.
 - Neynar image embeds often arrive as `metadata.content_type: image/*` plus `metadata.image`, even when the URL has no file extension. The media normalizer must treat those as images and should rank direct image/OG/frame previews above embedded-cast fallbacks.
+- Inline feed video setup now lives in `src/services/video.ts`. If remote feed videos stop playing inline in Chromium-class browsers, check the HLS detection/helper there before changing the feed renderer.
+- `hls.js` is lazy-loaded into its own Vite chunk for inline feed playback. That chunk currently triggers Rollup's 500 kB size warning during `npm run build`, but the build still succeeds and the split stays off the main bundle.
 - Media downloads are handled client-side in `src/app.ts` with a fetch-to-blob attempt and a new-tab fallback. If you add new downloadable media surfaces, keep them behind sanitized URLs and `data-download-url` buttons.
 - Pull-to-refresh now lives on `.shell-content` in `src/app.ts` and only arms when Home is at scroll-top with no overlay open. Keep the gesture tied to the feed scroller so the bottom nav stays fixed.
 - Feed action counts are currently local-shell behavior: replies are derived from persisted local reply casts, and like/recast toggles are stored in `localStorage`. Preserve that relationship unless the product moves to a real write API.
