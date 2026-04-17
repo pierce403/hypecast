@@ -1,0 +1,23 @@
+<svg width="1280" height="320" viewBox="0 0 1280 320" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Hypecast logo</title>
+  <desc id="desc">The Hypecast logo with a dark rounded-square monogram and a warm-to-cool wordmark.</desc>
+
+  <g transform="translate(24 24)">
+    <rect width="272" height="272" rx="74" fill="#08111D"/>
+    <circle cx="74" cy="72" r="34" fill="#1ED3A6" fill-opacity="0.18"/>
+    <circle cx="222" cy="80" r="48" fill="#F25F3A" fill-opacity="0.24"/>
+    <circle cx="232" cy="216" r="62" fill="#4E8CFF" fill-opacity="0.22"/>
+    <path d="M106 74H152V143H202V74H248V226H202V184H152V226H106V74Z" fill="#FFF3DE"/>
+  </g>
+
+  <text
+    x="376"
+    y="210"
+    font-family="Avenir Next, Trebuchet MS, Segoe UI, Arial, sans-serif"
+    font-size="170"
+    font-weight="800"
+    letter-spacing="-6"
+  >
+    <tspan fill="#08111D">Hype</tspan><tspan fill="#4E8CFF">cast</tspan>
+  </text>
+</svg>

@@ -71,6 +71,7 @@ Notes:
 - `src/styles.css`: global styles and responsive layout
 - `scripts/sync-farcaster-feed.mjs`: refreshes `public/farcaster-feed.json` from public Farcaster SSR profile pages
 - `public/farcaster-feed.json`: committed same-origin snapshot used by the home feed in production
+- `public/logo.svg`: public brand logo served directly at `/logo.svg`
 - `tests/`: Playwright end-to-end coverage for the mobile shell and mocked integration flows
 - `public/icons/icon.svg`: app icon used by the PWA manifest
 - `vite.config.ts`: Vite config plus PWA and Workbox settings
@@ -161,6 +162,7 @@ Notes:
 - A `signer_uuid` is paired with the Neynar API key that created it. If write auth behaves inconsistently, inspect `hypecast:neynar-client-id`, `hypecast:neynar-api-key`, and `hypecast:farcaster-write-session` together instead of changing just one value.
 - Feed action counts still patch locally after successful writes so the shell updates immediately, but the old purely local reaction state was migrated away by clearing `hypecast:feed-interactions` once under the `hypecast:feed-interactions-v2-migrated` flag.
 - Playwright now runs against both `mobile-chromium` and `desktop-chromium`. If layout changes are viewport-specific, keep assertions for both form factors green.
+- A quick way to sanity-check SVG brand assets locally is Chromium headless screenshot output, e.g. `/snap/bin/chromium --headless --disable-gpu --screenshot=./preview.png file:///.../public/logo.svg`.
 
 ## Rapport & Reflection
 
