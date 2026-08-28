@@ -34,6 +34,8 @@ Hypecast is a static GitHub Pages application. There is no Hypecast-owned applic
 
 - Wallet connection state and chain/account metadata
 - Farcaster sign-in state, relay channel URLs, and bound profile metadata
+- Farcaster custody recovery phrases and private keys while an account sheet is active
+- The decrypted Ed25519 app signer while signing is unlocked, plus its encrypted browser vault
 - XMTP browser storage and derived inbox/account identifiers
 - Local drafts, local casts, cached feed snapshots, and Neynar key overrides stored in the browser
 
@@ -42,7 +44,9 @@ Hypecast is a static GitHub Pages application. There is no Hypecast-owned applic
 - The browser and device running Hypecast
 - The injected wallet provider
 - Farcaster auth relay infrastructure used during SIWF
-- Neynar's API when loading personalized following feeds
+- The configured Optimism RPC and Farcaster IdGateway used for account inspection and registration
+- Neynar's API when loading personalized following feeds or submitting signed messages
+- The public Haatz Snapchain gateway used as a signer-state and message-submission fallback
 - XMTP's browser SDK, storage, and network
 - GitHub Pages as the static asset host
 
@@ -52,6 +56,11 @@ Hypecast is a static GitHub Pages application. There is no Hypecast-owned applic
 - Remote `href` and `src` values are protocol-allowlisted before rendering
 - External links use `rel="noreferrer"`
 - The app ships a restrictive meta `Content-Security-Policy` and `Referrer-Policy`
+- Imported custody material is held only in memory for the active account flow, the import control is cleared after parsing, and raw custody secrets are never persisted in `localStorage`
+- The local Ed25519 app signer seed is encrypted with AES-GCM under an HKDF-SHA-256 key derived from the custody private key and must be unlocked by importing the custody secret again after reload
+- Direct writes require the unlocked signer FID to match the visible Farcaster profile; switching identities locks mismatched local signing state
+- Optimism registration requires a fresh IdGateway quote and balance check, explicit plaintext-backup confirmation, a successful transaction receipt, and FID readback
+- Signed Farcaster submissions use bounded network calls and best-effort message readback; a successful submission can still show pending while propagation completes
 - Unit tests cover URL sanitization and feed-preview normalization
 - Playwright covers end-to-end shell flows and deployable UI behavior
 - Every completed task should be pushed and the GitHub Pages deploy verified before considering it done
@@ -64,6 +73,7 @@ Hypecast is a static GitHub Pages application. There is no Hypecast-owned applic
   - Locally published casts
   - Feed snapshot cache
   - Optional Neynar API key override
+  - Encrypted Ed25519 signer seed, signer metadata, random salt, and IV; never the raw custody phrase or private key
 - OPFS / browser-managed storage
   - XMTP client data
 
@@ -72,14 +82,20 @@ Hypecast is a static GitHub Pages application. There is no Hypecast-owned applic
 - The built-in Neynar client key is client-visible by design. It is not a secret-management solution.
 - GitHub Pages cannot set full response headers for every hardening control, so CSP is currently enforced through a meta tag.
 - If the browser, device, wallet extension, or operating system is compromised, Hypecast cannot protect the user from that compromise.
-- Browser-local storage is user-accessible on the device. It must not be treated as secure secret storage.
-- Hypecast does not ask for or need seed phrases or private keys. Any flow requesting them is unsafe.
+- Browser-local storage is user-accessible on the device. The signer seed is encrypted, but its vault metadata and ciphertext remain available to scripts running in the same origin.
+- Hypecast's local-account flow deliberately accepts custody recovery phrases and private keys. The browser cannot provide hardware-wallet-grade isolation: malicious extensions, injected scripts, clipboard monitors, screenshots, or a compromised device can capture secrets while they are visible or in memory.
+- Generated account downloads and clipboard exports are plaintext and fully control the Farcaster custody account. Hypecast cannot recover a lost backup.
+- Locking clears the decrypted app signer from memory. Hypecast locks it on reload, page backgrounding, or 15 minutes of inactivity. Forgetting the encrypted local vault deletes only this browser's copy and does not revoke the already authorized signer from the Farcaster network.
+- A successful IdGateway registration creates an FID, not a username. Username ownership must be claimed separately through a supported Farcaster username flow.
+- Haatz is a public third-party fallback. Signed messages sent through any gateway disclose their public protocol contents and depend on that gateway for availability, while message readback remains best-effort.
 
 ### Safe Usage Guidance
 
-- Use a test wallet when evaluating new wallet or XMTP flows
+- Use a test wallet or low-value account when evaluating wallet, Farcaster registration, or XMTP flows
 - Keep the browser, wallet extension, and operating system updated
-- Do not paste seed phrases, private keys, or wallet recovery material into Hypecast
+- Import custody secrets only on a trusted device at the expected Hypecast origin, and close or lock the account when finished
+- Store generated plaintext backups offline, never share them, and clear the clipboard after copying one
+- Treat local vault deletion as device cleanup, not signer revocation; revoke network-authorized signers separately when required
 - Treat browser-local Neynar overrides as convenience configuration, not protected credentials
 
 ## Scope Notes

@@ -564,15 +564,176 @@ code {
   background: rgba(255, 255, 255, 0.04);
 }
 
-.secret-field input {
+.secret-field input,
+.secret-field textarea {
   width: 100%;
   border: 0;
   background: transparent;
   color: var(--text);
 }
 
-.secret-field input:focus {
+.secret-field textarea {
+  min-height: 92px;
+  padding: 14px 0;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.secret-field input:focus,
+.secret-field textarea:focus {
   outline: none;
+}
+
+.account-secret-field {
+  align-items: flex-start;
+}
+
+.account-custody-card {
+  border-color: rgba(35, 209, 179, 0.2);
+  background:
+    linear-gradient(180deg, rgba(35, 209, 179, 0.07), transparent 160px),
+    rgba(255, 255, 255, 0.025);
+}
+
+.account-session-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.profile-edit-fields,
+.registration-steps {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.custody-warning,
+.account-success-card,
+.account-address-card {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 167, 82, 0.26);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 167, 82, 0.09), transparent 120px),
+    rgba(255, 255, 255, 0.025);
+}
+
+.custody-warning strong,
+.account-success-card strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.custody-warning.is-critical {
+  border-color: rgba(255, 107, 127, 0.26);
+  background:
+    linear-gradient(180deg, rgba(255, 107, 127, 0.09), transparent 120px),
+    rgba(255, 255, 255, 0.025);
+}
+
+.account-success-card {
+  border-color: rgba(35, 209, 179, 0.24);
+  background:
+    linear-gradient(180deg, rgba(35, 209, 179, 0.08), transparent 120px),
+    rgba(255, 255, 255, 0.025);
+}
+
+.account-address-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-color: var(--border);
+}
+
+.account-address-value {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+.compact-button {
+  flex: 0 0 auto;
+  min-height: 38px;
+}
+
+.mnemonic-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mnemonic-grid li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.mnemonic-grid li span {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.funding-qr-card {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.backup-confirmation {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 6px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  color: rgba(246, 246, 248, 0.88);
+  line-height: 1.4;
+}
+
+.backup-confirmation input {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  accent-color: var(--warm);
+}
+
+.account-alternate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.text-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #cbd0ff;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.full-width-button {
+  width: 100%;
+}
+
+.account-gate-copy {
+  text-align: center;
 }
 
 .write-access-fields {

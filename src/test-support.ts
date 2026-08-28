@@ -24,6 +24,43 @@ export interface HypecastTestXmtpSession {
   installationId?: string;
 }
 
+export type HypecastTestFarcasterCustodySecretKind = "mnemonic" | "privateKey";
+
+export interface HypecastTestFarcasterCustodyAccount {
+  address: Address;
+  privateKey: `0x${string}`;
+  mnemonic?: string;
+  kind: HypecastTestFarcasterCustodySecretKind;
+}
+
+export interface HypecastTestFarcasterAccountQuote {
+  address: Address;
+  recoveryAddress: Address;
+  balanceWei: string;
+  registrationPriceWei: string;
+  recommendedBalanceWei: string;
+  recommendedFundingWei: string;
+  fid?: number;
+}
+
+export interface HypecastTestFarcasterRegistration {
+  fid: number;
+  transactionHash: `0x${string}`;
+}
+
+export interface HypecastTestLocalFarcasterSession {
+  fid: number;
+  custodyAddress: Address;
+  signerKeyId: string;
+  signerPublicKey: `0x${string}`;
+  apiKey: string;
+}
+
+export interface HypecastTestLocalFarcasterConnection {
+  session: HypecastTestLocalFarcasterSession;
+  profile: FarcasterProfile;
+}
+
 export interface HypecastTestApi {
   isStandalone?: boolean;
   loadFeedSnapshot?: (options?: FeedLoadOptions) => Promise<FeedSnapshot>;
@@ -39,6 +76,53 @@ export interface HypecastTestApi {
     nonce: string;
     onPoll?: () => void;
   }) => Promise<FarcasterProfile>;
+  inspectFarcasterAccount?: (options: {
+    address: Address;
+    recoveryAddress: Address;
+  }) => Promise<HypecastTestFarcasterAccountQuote>;
+  registerFarcasterAccount?: (options: {
+    account: HypecastTestFarcasterCustodyAccount;
+    recoveryAddress: Address;
+  }) => Promise<HypecastTestFarcasterRegistration>;
+  connectLocalFarcasterAccount?: (options: {
+    fid: number;
+    custodyAddress?: string;
+    registrationTransactionHash?: `0x${string}`;
+  }) => Promise<Partial<HypecastTestLocalFarcasterSession> | void>;
+  publishSignedCast?: (options: {
+    text: string;
+    parent?: { fid: number; hash: string } | { url: string };
+  }) => Promise<{ hash?: string } | void>;
+  publishSignedReaction?: (options: {
+    reactionType: "like" | "recast";
+    target: { fid: number; hash: string } | { url: string };
+    remove?: boolean;
+  }) => Promise<void>;
+  removeSignedCast?: (options: {
+    targetHash: string;
+  }) => Promise<void>;
+  publishSignedLink?: (options: {
+    targetFid: number;
+    type?: string;
+    remove?: boolean;
+  }) => Promise<void>;
+  publishSignedProfile?: (options: {
+    type:
+      | "pfp"
+      | "displayName"
+      | "bio"
+      | "url"
+      | "username"
+      | "location"
+      | "twitter"
+      | "github"
+      | "banner"
+      | "primaryAddressEthereum"
+      | "primaryAddressSolana"
+      | "profileToken"
+      | "liveAt";
+    value: string;
+  }) => Promise<void>;
   connectFarcasterWriteAccess?: (options: {
     clientId: string;
     apiKey: string;

@@ -77,6 +77,31 @@ async function mockInlineVideoPlayback(page: Page) {
   });
 }
 
+async function mockFarcasterProfileLookup(page: Page) {
+  await page.route("https://api.neynar.com/v2/farcaster/user/bulk**", async (route) => {
+    const fid = Number(new URL(route.request().url()).searchParams.get("fids"));
+
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        users: [
+          {
+            fid,
+            username: `local-${fid}`,
+            display_name: `Local FID ${fid}`,
+            pfp_url: "",
+            profile: {
+              bio: {
+                text: "Connected with a local Hypecast signer."
+              }
+            }
+          }
+        ]
+      })
+    });
+  });
+}
+
 test("renders the mobile shell, filters snapshot tabs, and opens overlays", async ({ page }) => {
   const nav = primaryNav(page);
   const main = shellMain(page);
@@ -208,6 +233,9 @@ test("reply, recast, and like buttons publish through Farcaster write access", a
   expect(scrollBeforeLike).toBeGreaterThan(0);
 
   await likeButton.click();
+  const accountAccess = page.getByRole("dialog", { name: "Farcaster account access" });
+  await expect(accountAccess).toBeVisible();
+  await accountAccess.getByRole("button", { name: "Use a hosted Neynar signer instead" }).click();
   await expect(page.getByRole("heading", { level: 2, name: "Connect Farcaster writes" })).toBeVisible();
   await page.getByRole("button", { name: "Continue with Neynar" }).click();
   await expect(likeButton).toHaveAttribute("aria-pressed", "true");
@@ -230,6 +258,89 @@ test("reply, recast, and like buttons publish through Farcaster write access", a
   await expect(main.getByText(replyText)).toBeVisible();
   await expect(main.getByText("local only")).toHaveCount(0);
   await expect(replyButton.locator(".feed-action-count")).toHaveText("5");
+});
+
+test("resolves permalink-only casts instead of trusting embedded hash text", async ({ page }) => {
+  const embeddedHash = `0x${"aa".repeat(20)}`;
+  const resolvedHash = `0x${"bb".repeat(20)}`;
+  const maliciousPermalink = `https://example.com/casts/${embeddedHash}`;
+  const castId = "permalink-only-cast";
+  let lookupIdentifier: string | null = null;
+  let lookupType: string | null = null;
+
+  await page.route("https://api.neynar.com/v2/farcaster/cast/**", async (route) => {
+    const requestUrl = new URL(route.request().url());
+    lookupIdentifier = requestUrl.searchParams.get("identifier");
+    lookupType = requestUrl.searchParams.get("type");
+
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        cast: {
+          hash: resolvedHash,
+          text: "Resolved through the trusted cast lookup response.",
+          timestamp: "2026-04-16T04:00:00.000Z",
+          author: {
+            fid: 3,
+            username: "farcaster",
+            display_name: "Farcaster"
+          }
+        }
+      })
+    });
+  });
+
+  await mountApp(page, {
+    feed: {
+      snapshot: {
+        ...defaultFeedSnapshot,
+        casts: defaultFeedSnapshot.casts.map((cast, index) =>
+          index === 0
+            ? {
+                ...cast,
+                id: castId,
+                permalink: maliciousPermalink
+              }
+            : cast
+        )
+      }
+    },
+    localWrite: {
+      preconnected: true
+    }
+  });
+
+  await page.getByRole("tab", { name: "farcaster" }).click();
+  const likeButton = shellMain(page).locator(
+    `[data-action="like-cast"][data-cast-id="${castId}"]`
+  );
+  await likeButton.click();
+
+  await expect(likeButton).toHaveAttribute("aria-pressed", "true");
+  expect(lookupIdentifier).toBe(maliciousPermalink);
+  expect(lookupType).toBe("url");
+
+  const reactionCalls = await page.evaluate(
+    () =>
+      (
+        window as Window & {
+          __hypecastLocalWriteCalls?: { reactions: unknown[] };
+        }
+      ).__hypecastLocalWriteCalls?.reactions ?? []
+  );
+  expect(reactionCalls).toHaveLength(1);
+  expect(reactionCalls[0]).toMatchObject({
+    reactionType: "like",
+    target: {
+      fid: 3,
+      hash: resolvedHash
+    }
+  });
+  expect(reactionCalls[0]).not.toMatchObject({
+    target: {
+      hash: embeddedHash
+    }
+  });
 });
 
 test("opens the cast menu and applies local delete, copy link, mute, and block actions", async ({ page }) => {
@@ -557,6 +668,327 @@ test("persists the Farcaster profile across reloads", async ({ page }) => {
   await page.getByRole("button", { name: "Open account", exact: true }).click();
   await expect(page.getByRole("heading", { level: 2, name: "Ada Lovelace" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign In With Farcaster" })).toHaveCount(0);
+});
+
+test("locks a local signer and clears old profile fields when switching to a bare FID", async ({
+  page
+}) => {
+  const oldAvatarUrl = "https://example.com/account-a.png";
+  const blockedCast = "This must not publish with the previous account signer.";
+
+  await mountApp(page, {
+    farcaster: {
+      exactProfile: {
+        fid: 888
+      }
+    },
+    localWrite: {
+      preconnected: true,
+      session: {
+        fid: 777
+      },
+      profile: {
+        fid: 777,
+        username: "account-a",
+        displayName: "Account A",
+        bio: "Profile data that belongs only to FID 777.",
+        pfpUrl: oldAvatarUrl
+      }
+    }
+  });
+
+  await page.getByRole("button", { name: "Open account", exact: true }).click();
+  const accountSheet = overlaySheet(page);
+  await expect(accountSheet.getByRole("heading", { level: 2, name: "Account A" })).toBeVisible();
+  await expect(accountSheet.getByRole("heading", { level: 3, name: "Signing unlocked" })).toBeVisible();
+
+  await accountSheet.getByRole("button", { name: "Refresh Farcaster" }).click();
+
+  await expect(accountSheet.getByRole("heading", { level: 2, name: "Hypecast" })).toBeVisible();
+  await expect(accountSheet.getByText("fid 888", { exact: true })).toBeVisible();
+  await expect(accountSheet.getByRole("heading", { level: 3, name: "Import or create an account" })).toBeVisible();
+  await expect(accountSheet.getByText("Account A", { exact: true })).toHaveCount(0);
+  await expect(accountSheet.getByText("@account-a", { exact: true })).toHaveCount(0);
+  await expect(accountSheet.getByText("Profile data that belongs only to FID 777.")).toHaveCount(0);
+  await expect(accountSheet.locator(`img[src="${oldAvatarUrl}"]`)).toHaveCount(0);
+
+  const storedProfile = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("hypecast:farcaster-profile") ?? "null")
+  );
+  expect(storedProfile).toEqual({ fid: 888 });
+
+  await accountSheet.getByRole("button", { name: "Close account sheet" }).click();
+  await page.getByRole("button", { name: "New cast" }).click();
+  await page.getByPlaceholder("What’s happening on Hypecast?").fill(blockedCast);
+  await page.getByRole("button", { name: "Post to Farcaster" }).click();
+
+  await expect(page.getByRole("dialog", { name: "Farcaster account access" })).toBeVisible();
+  const signedCastCalls = await page.evaluate(
+    () =>
+      (
+        window as Window & {
+          __hypecastLocalWriteCalls?: { casts: unknown[] };
+        }
+      ).__hypecastLocalWriteCalls?.casts.length ?? 0
+  );
+  expect(signedCastCalls).toBe(0);
+});
+
+test("imports a registered custody key without persisting it and writes with the local signer", async ({
+  page
+}) => {
+  const privateKey = `0x${"11".repeat(32)}`;
+  const directWriteCastHash = `0x${"ab".repeat(20)}`;
+  const castText = "Published directly with a locally authorized Farcaster signer.";
+  const main = shellMain(page);
+
+  await mockFarcasterProfileLookup(page);
+  await mountApp(page, {
+    account: {
+      quote: {
+        fid: 777,
+        balanceWei: "500000000000000",
+        recommendedFundingWei: "0"
+      }
+    },
+    feed: {
+      snapshot: {
+        ...defaultFeedSnapshot,
+        casts: defaultFeedSnapshot.casts.map((cast, index) =>
+          index === 0 ? { ...cast, id: directWriteCastHash } : cast
+        )
+      }
+    }
+  });
+
+  await page.getByRole("button", { name: "Open account", exact: true }).click();
+  await overlaySheet(page).getByRole("button", { name: "Import or unlock" }).click();
+
+  const accountAccess = page.getByRole("dialog", { name: "Farcaster account access" });
+  const secretInput = accountAccess.getByLabel(
+    "Recovery phrase, custody private key, or backup JSON"
+  );
+  await secretInput.fill(privateKey);
+  const secretInputHandle = await secretInput.elementHandle();
+
+  await accountAccess.getByRole("button", { name: "Review imported account" }).click();
+
+  await expect(accountAccess.getByRole("heading", { name: "Unlock FID 777" })).toBeVisible();
+  expect(secretInputHandle).not.toBeNull();
+  expect(
+    await secretInputHandle!.evaluate((element) => (element as HTMLTextAreaElement).value)
+  ).toBe("");
+
+  const storageAfterInspection = await page.evaluate(() =>
+    Array.from({ length: window.localStorage.length }, (_, index) => {
+      const key = window.localStorage.key(index) ?? "";
+      return [key, window.localStorage.getItem(key) ?? ""];
+    })
+  );
+  expect(JSON.stringify(storageAfterInspection)).not.toContain(privateKey);
+
+  await accountAccess.getByRole("button", { name: "Unlock FID 777" }).click();
+  await expect(accountAccess).toHaveCount(0);
+
+  const storageAfterUnlock = await page.evaluate(() =>
+    Array.from({ length: window.localStorage.length }, (_, index) => {
+      const key = window.localStorage.key(index) ?? "";
+      return [key, window.localStorage.getItem(key) ?? ""];
+    })
+  );
+  expect(JSON.stringify(storageAfterUnlock)).not.toContain(privateKey);
+
+  await page.getByRole("button", { name: "New cast" }).click();
+  await page.getByPlaceholder("What’s happening on Hypecast?").fill(castText);
+  await expect(page.getByRole("button", { name: "Post to Farcaster" })).toBeEnabled();
+  await page.getByRole("button", { name: "Post to Farcaster" }).click();
+  await expect(main.getByText(castText)).toBeVisible();
+
+  await page.getByRole("tab", { name: "farcaster" }).click();
+  const likeButton = main.locator(
+    `[data-action="like-cast"][data-cast-id="${directWriteCastHash}"]`
+  );
+  await likeButton.click();
+  await expect(likeButton).toHaveAttribute("aria-pressed", "true");
+  await expect(likeButton.locator(".feed-action-count")).toHaveText("30");
+  await expect(
+    page.getByRole("heading", { level: 2, name: "Connect Farcaster writes" })
+  ).toHaveCount(0);
+});
+
+test("ignores a stale account inspection after switching to a generated custody account", async ({
+  page
+}) => {
+  const privateKey = `0x${"22".repeat(32)}`;
+
+  await mountApp(page, {
+    account: {
+      inspectDelaysMs: [1_500, 0],
+      quotes: [
+        {
+          balanceWei: "9000000000000000000",
+          registrationPriceWei: "4000000000000000000",
+          recommendedBalanceWei: "5000000000000000000",
+          recommendedFundingWei: "0"
+        },
+        {
+          balanceWei: "2000000000000000000",
+          registrationPriceWei: "1000000000000000000",
+          recommendedBalanceWei: "3000000000000000000",
+          recommendedFundingWei: "1000000000000000000"
+        }
+      ]
+    }
+  });
+
+  await page.getByRole("button", { name: "Open account", exact: true }).click();
+  await overlaySheet(page).getByRole("button", { name: "Import or unlock" }).click();
+
+  const accountAccess = page.getByRole("dialog", { name: "Farcaster account access" });
+  await accountAccess
+    .getByLabel("Recovery phrase, custody private key, or backup JSON")
+    .fill(privateKey);
+  await accountAccess.getByRole("button", { name: "Review imported account" }).click();
+
+  const custodyAddress = accountAccess.locator(".account-address-value");
+  await expect(custodyAddress).toBeVisible();
+  const importedAddress = (await custodyAddress.textContent())?.trim();
+  expect(importedAddress).toBeTruthy();
+
+  await accountAccess.getByRole("button", { name: "Use a different key" }).click();
+  await accountAccess.getByRole("button", { name: "Create a new account" }).click();
+
+  const recoveryPhrase = accountAccess.getByRole("list", {
+    name: "New account recovery phrase"
+  });
+  await expect(accountAccess.getByRole("heading", { name: "Register a Farcaster account" })).toBeVisible();
+  await expect(recoveryPhrase.locator("li")).toHaveCount(12);
+
+  const generatedAddress = (await custodyAddress.textContent())?.trim();
+  const generatedMnemonic = await recoveryPhrase.locator("li").allTextContents();
+  expect(generatedAddress).toBeTruthy();
+  expect(generatedAddress).not.toBe(importedAddress);
+
+  const registrationSteps = accountAccess.locator(".registration-steps");
+  const currentBalance = registrationSteps.locator(".mini-item").filter({
+    hasText: "Current balance"
+  });
+  const stillNeeded = registrationSteps.locator(".mini-item").filter({
+    hasText: "Still needed"
+  });
+  const fundingQrCode = registrationSteps.getByRole("img", {
+    name: "Fund custody address on Optimism QR code"
+  });
+
+  await expect(currentBalance.getByText("2 ETH", { exact: true })).toBeVisible();
+  await expect(stillNeeded.getByText("1 ETH", { exact: true })).toBeVisible();
+  const generatedFundingQrCode = await fundingQrCode.getAttribute("src");
+  expect(generatedFundingQrCode).toBeTruthy();
+  expect(decodeURIComponent(generatedFundingQrCode!)).toContain(
+    `ethereum:${generatedAddress}@10`
+  );
+
+  await page.waitForTimeout(1_700);
+
+  await expect(custodyAddress).toHaveText(generatedAddress!);
+  expect(await recoveryPhrase.locator("li").allTextContents()).toEqual(generatedMnemonic);
+  await expect(currentBalance.getByText("2 ETH", { exact: true })).toBeVisible();
+  await expect(stillNeeded.getByText("1 ETH", { exact: true })).toBeVisible();
+  await expect(registrationSteps.getByText("9 ETH", { exact: true })).toHaveCount(0);
+  await expect(fundingQrCode).toHaveAttribute("src", generatedFundingQrCode!);
+  expect(decodeURIComponent((await fundingQrCode.getAttribute("src"))!)).not.toContain(
+    `ethereum:${importedAddress}@10`
+  );
+});
+
+test("reports clipboard fallback failure when execCommand returns false", async ({ page }) => {
+  await mountApp(page);
+
+  await page.getByRole("button", { name: "Open account", exact: true }).click();
+  await overlaySheet(page).getByRole("button", { name: "Create new account" }).click();
+
+  const accountAccess = page.getByRole("dialog", { name: "Farcaster account access" });
+  await expect(accountAccess.locator(".account-address-value")).toBeVisible();
+  await page.evaluate(() => {
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: undefined
+    });
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: () => false
+    });
+  });
+
+  await accountAccess.getByRole("button", { name: "Copy", exact: true }).click();
+
+  await expect(
+    accountAccess.getByText("The custody address could not be copied. Select and copy it manually.")
+  ).toBeVisible();
+  await expect(page.locator('body > textarea[readonly=""]')).toHaveCount(0);
+});
+
+test("creates and registers a Farcaster account only after backup and Optimism funding gates", async ({
+  page
+}) => {
+  await mockFarcasterProfileLookup(page);
+  await mountApp(page, {
+    account: {
+      quotes: [
+        {
+          balanceWei: "0",
+          recommendedFundingWei: "280142328119754"
+        },
+        {
+          balanceWei: "500000000000000",
+          recommendedFundingWei: "0"
+        }
+      ],
+      registration: {
+        fid: 888,
+        transactionHash: `0x${"c".repeat(64)}`
+      }
+    }
+  });
+
+  await page.getByRole("button", { name: "Open account", exact: true }).click();
+  await overlaySheet(page).getByRole("button", { name: "Create new account" }).click();
+
+  const accountAccess = page.getByRole("dialog", { name: "Farcaster account access" });
+  const recoveryPhrase = accountAccess.getByRole("list", {
+    name: "New account recovery phrase"
+  });
+  const registerButton = accountAccess.getByRole("button", {
+    name: "Register account on Optimism"
+  });
+  const backupConfirmation = accountAccess.getByRole("checkbox", {
+    name: /I saved the custody backup offline/
+  });
+
+  await expect(accountAccess.getByRole("heading", { name: "Register a Farcaster account" })).toBeVisible();
+  await expect(recoveryPhrase.locator("li")).toHaveCount(12);
+  await expect(registerButton).toBeDisabled();
+  await expect(accountAccess.getByText(/Fund at least .* ETH more on Optimism/)).toBeVisible();
+
+  await backupConfirmation.check();
+  await expect(registerButton).toBeDisabled();
+  await backupConfirmation.uncheck();
+
+  await accountAccess.getByRole("button", { name: "Refresh price and balance" }).click();
+  await expect(accountAccess.getByText("Confirm the offline backup before registration.")).toBeVisible();
+  await expect(registerButton).toBeDisabled();
+
+  await backupConfirmation.check();
+  await expect(registerButton).toBeEnabled();
+  await registerButton.click();
+  await expect(accountAccess).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Open account", exact: true }).click();
+  const accountSheet = overlaySheet(page);
+  await expect(accountSheet.getByRole("heading", { level: 3, name: "Signing unlocked" })).toBeVisible();
+  await expect(
+    accountSheet.getByText("FID 888 is using a scoped Ed25519 app signer.", { exact: false })
+  ).toBeVisible();
 });
 
 test("searches local shell content and opens matching results", async ({ page }) => {

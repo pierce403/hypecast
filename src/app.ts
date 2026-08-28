@@ -1,9 +1,33 @@
 import { APP_CONFIG } from "./config";
+import { formatEther, type Address, type Hex } from "viem";
+import {
+  createCustodyBackupDownload,
+  createCustodyBackupJson,
+  fetchFarcasterProfileByFid,
+  generateCustodyAccount,
+  inspectAccountOnOptimism,
+  parseCustodySecret,
+  registerAccountOnOptimism,
+  type CustodyAccount,
+  type OptimismAccountInspection
+} from "./services/farcaster-account";
 import {
   createChannelQrCode,
   createFarcasterChannel,
   waitForFarcasterProfile
 } from "./services/farcaster";
+import {
+  connectLocalFarcasterAccount,
+  forgetActiveFarcasterSigner,
+  getActiveFarcasterSignerSession,
+  hasActiveFarcasterSigner,
+  lockActiveFarcasterSigner,
+  publishSignedCast,
+  publishSignedProfile,
+  publishSignedReaction,
+  removeSignedCast,
+  type FarcasterCastIdInput
+} from "./services/farcaster-signer";
 import {
   clearStoredNeynarApiKey,
   getDefaultNeynarApiKey,
@@ -63,6 +87,7 @@ type Overlay =
   | "settings"
   | "media"
   | "cast-menu"
+  | "account-access"
   | "write-access";
 type IconName =
   | "apps"
@@ -119,10 +144,21 @@ interface UiState {
   writeAccessApiKeyDraft: string;
   writeAccessStatus: "idle" | "connecting";
   writeAccessError?: string;
+  accountAccessSource: "import" | "generated";
+  accountAccessStatus: "idle" | "inspecting" | "registering" | "connecting" | "saving-profile";
+  accountAccessError?: string;
+  accountAccessNotice?: string;
+  accountAddress?: Address;
+  accountInspection?: OptimismAccountInspection;
+  accountRecoveryDraft: string;
+  accountFundingQrCode?: string;
+  accountBackupConfirmed: boolean;
+  accountGeneratedMnemonic?: string;
+  accountRegistrationTx?: string;
 }
 
 interface FocusTarget {
-  field: "search" | "composer" | "write-client-id" | "write-api-key";
+  field: "search" | "composer" | "write-client-id" | "write-api-key" | "account-secret";
   start?: number;
   end?: number;
 }
@@ -154,6 +190,10 @@ type PendingWriteIntent =
       kind: "reaction";
       castId: string;
       reactionType: "like" | "recast";
+    }
+  | {
+      kind: "delete-cast";
+      castId: string;
     };
 
 const STORAGE_KEYS = {
@@ -166,6 +206,10 @@ const STORAGE_KEYS = {
   blockedAuthors: "hypecast:blocked-authors",
   dismissedCastIds: "hypecast:dismissed-cast-ids"
 } as const;
+
+const DEFAULT_FARCASTER_RECOVERY_ADDRESS =
+  "0x00000000fcb080a4d6c39a9354da9eb9bc104cd7" as Address;
+const LOCAL_SIGNER_IDLE_TIMEOUT_MS = 15 * 60_000;
 
 const feedAggregateTab = {
   id: "following",
@@ -585,7 +629,18 @@ function getInitialUiState(): UiState {
     writeAccessClientIdDraft: loadStoredNeynarClientId() || getDefaultNeynarClientId(),
     writeAccessApiKeyDraft: loadStoredNeynarApiKey(),
     writeAccessStatus: "idle",
-    writeAccessError: undefined
+    writeAccessError: undefined,
+    accountAccessSource: "import",
+    accountAccessStatus: "idle",
+    accountAccessError: undefined,
+    accountAccessNotice: undefined,
+    accountAddress: undefined,
+    accountInspection: undefined,
+    accountRecoveryDraft: DEFAULT_FARCASTER_RECOVERY_ADDRESS,
+    accountFundingQrCode: undefined,
+    accountBackupConfirmed: false,
+    accountGeneratedMnemonic: undefined,
+    accountRegistrationTx: undefined
   };
 }
 
@@ -879,7 +934,16 @@ function buildLocalCast(state: AppState, ui: UiState, text: string): FeedCast {
   };
 }
 
-function hasRealFarcasterWriteConfigured(): boolean {
+function activeSignerForProfile(profile?: FarcasterProfile) {
+  const signer = getActiveFarcasterSignerSession();
+  return signer && signer.fid === profile?.fid ? signer : undefined;
+}
+
+function hasRealFarcasterWriteConfigured(profile?: FarcasterProfile): boolean {
+  if (activeSignerForProfile(profile)) {
+    return true;
+  }
+
   const clientId = getEffectiveNeynarClientId();
   const apiKey = getEffectiveNeynarApiKey();
 
@@ -897,12 +961,12 @@ function publishButtonLabel(ui: UiState): string {
   return ui.replyTargetCastId ? "Reply on Farcaster" : "Post to Farcaster";
 }
 
-function publishSupportCopy(ui: UiState): string {
+function publishSupportCopy(ui: UiState, profile?: FarcasterProfile): string {
   return ui.replyTargetCastId
-    ? hasRealFarcasterWriteConfigured()
+    ? hasRealFarcasterWriteConfigured(profile)
       ? "Replies publish to Farcaster and should appear in other clients."
       : "Replies publish to Farcaster after you connect write access the first time."
-    : hasRealFarcasterWriteConfigured()
+    : hasRealFarcasterWriteConfigured(profile)
       ? "Posts publish to Farcaster and should appear in other clients."
       : "Posts publish to Farcaster after you connect write access the first time.";
 }
@@ -949,10 +1013,41 @@ function reactionTargetForCast(cast: FeedCast): string | undefined {
   return sanitizeLinkUrl(cast.permalink);
 }
 
+function directCastTargetForCast(cast: FeedCast): FarcasterCastIdInput | undefined {
+  if (/^0x[0-9a-f]{40}$/i.test(cast.id) && typeof cast.authorFid === "number") {
+    return {
+      fid: cast.authorFid,
+      hash: cast.id
+    };
+  }
+
+  return undefined;
+}
+
+function formatEthAmount(value: bigint, maximumFractionDigits = 6): string {
+  const numeric = Number(formatEther(value));
+
+  if (!Number.isFinite(numeric)) {
+    return `${formatEther(value)} ETH`;
+  }
+
+  return `${new Intl.NumberFormat("en-US", {
+    maximumFractionDigits,
+    minimumFractionDigits: numeric > 0 && numeric < 0.000001 ? maximumFractionDigits : 0
+  }).format(numeric)} ETH`;
+}
+
 function mergeFarcasterProfile(
   currentProfile: FarcasterProfile | undefined,
   incomingProfile: FarcasterProfile
 ): FarcasterProfile {
+  if (!currentProfile || currentProfile.fid !== incomingProfile.fid) {
+    return {
+      ...incomingProfile,
+      fid: incomingProfile.fid
+    };
+  }
+
   return {
     ...currentProfile,
     ...incomingProfile,
@@ -2037,13 +2132,14 @@ function renderFarcasterRelayCard(state: AppState): string {
   `;
 }
 
-function renderProfileOverlay(state: AppState): string {
+function renderProfileOverlay(state: AppState, ui: UiState): string {
   const profile = state.farcaster.profile;
+  const localSigner = activeSignerForProfile(profile);
   const storedNeynarApiKey = loadStoredNeynarApiKey();
   const defaultNeynarApiKey = getDefaultNeynarApiKey();
   const effectiveNeynarApiKey = getEffectiveNeynarApiKey();
   const effectiveWriteClientId = getEffectiveNeynarClientId();
-  const hasWriteAccess = Boolean(
+  const hasHostedWriteAccess = Boolean(
     effectiveWriteClientId &&
       effectiveNeynarApiKey &&
       hasMatchingFarcasterWriteSession({
@@ -2070,8 +2166,8 @@ function renderProfileOverlay(state: AppState): string {
       : usingDefaultNeynarApiKey
         ? "The app's built-in Neynar key is ready. Sign in with Farcaster to load your following feed."
         : "Paste a Neynar API key to load your real following feed in this browser.";
-  const writeHelperText = hasWriteAccess
-    ? "Like, recast, and publish actions are ready to write to Farcaster from this browser."
+  const writeHelperText = hasHostedWriteAccess
+    ? "The optional hosted signer is connected as a fallback for write actions."
     : effectiveWriteClientId
       ? "Client credentials are present. Connect once with Neynar to approve a Farcaster signer for write actions."
       : "Write actions collect a Neynar client ID and matching API key the first time you like, recast, or post.";
@@ -2119,6 +2215,75 @@ function renderProfileOverlay(state: AppState): string {
             <strong>${escapeHtml(describeFeed(state.feed))}</strong>
           </div>
         </div>
+        <div class="feed-config-card account-custody-card">
+          <p class="eyebrow-label">local Farcaster account</p>
+          <h3>${localSigner ? "Signing unlocked" : profile?.custody ? "Signing locked" : "Import or create an account"}</h3>
+          <p class="support-copy">
+            ${
+              localSigner
+                ? `FID ${escapeHtml(String(localSigner.fid))} is using a scoped Ed25519 app signer. The custody key is no longer retained by the active flow. Signing locks when the app is backgrounded or idle for 15 minutes.`
+                : profile?.custody
+                  ? `Re-import the custody key for ${escapeHtml(shortAddress(profile.custody))} to unlock its encrypted app signer.`
+                  : "Import a custody private key or recovery phrase, or create a new FID through the Optimism IdGateway."
+            }
+          </p>
+          ${
+            localSigner
+              ? `
+                <div class="mini-list account-session-list">
+                  <div class="mini-item">
+                    <span>FID</span>
+                    <strong>${escapeHtml(String(localSigner.fid))}</strong>
+                  </div>
+                  <div class="mini-item">
+                    <span>Custody</span>
+                    <strong>${escapeHtml(shortAddress(localSigner.custodyAddress))}</strong>
+                  </div>
+                  <div class="mini-item">
+                    <span>Signer</span>
+                    <strong>${escapeHtml(localSigner.source === "provisioned" ? "Newly authorized" : localSigner.source === "vault" ? "Encrypted vault" : "Test session")}</strong>
+                  </div>
+                </div>
+                <div class="profile-edit-fields">
+                  <label class="write-access-label" for="profile-display-name">Display name</label>
+                  <label class="secret-field">
+                    <input id="profile-display-name" data-field="profile-display-name" type="text" maxlength="32" value="${escapeAttribute(profile?.displayName ?? "")}" autocomplete="off" />
+                  </label>
+                  <label class="write-access-label" for="profile-bio">Bio</label>
+                  <label class="secret-field">
+                    <textarea id="profile-bio" data-field="profile-bio" maxlength="256" rows="3">${escapeHtml(profile?.bio ?? "")}</textarea>
+                  </label>
+                  <label class="write-access-label" for="profile-pfp">Profile image URL</label>
+                  <label class="secret-field">
+                    <input id="profile-pfp" data-field="profile-pfp" type="url" value="${escapeAttribute(profile?.pfpUrl ?? "")}" autocomplete="off" autocapitalize="off" spellcheck="false" />
+                  </label>
+                </div>
+                ${
+                  ui.accountAccessError
+                    ? `<div class="write-access-error" role="status"><strong>Account action failed.</strong><p class="support-copy">${escapeHtml(ui.accountAccessError)}</p></div>`
+                    : ""
+                }
+                ${
+                  ui.accountAccessNotice
+                    ? `<div class="account-success-card" role="status"><p class="support-copy">${escapeHtml(ui.accountAccessNotice)}</p></div>`
+                    : ""
+                }
+                <div class="action-grid">
+                  <button class="primary-button" type="button" data-action="save-local-profile" ${ui.accountAccessStatus === "saving-profile" ? "disabled" : ""}>
+                    ${escapeHtml(ui.accountAccessStatus === "saving-profile" ? "Publishing profile..." : "Publish profile")}
+                  </button>
+                  <button class="secondary-button" type="button" data-action="lock-local-signer">Lock signer</button>
+                  <button class="secondary-button" type="button" data-action="forget-local-signer">Forget app signer</button>
+                </div>
+              `
+              : `
+                <div class="action-grid">
+                  <button class="primary-button" type="button" data-action="open-account-access">Import or unlock</button>
+                  <button class="secondary-button" type="button" data-action="generate-farcaster-account">Create new account</button>
+                </div>
+              `
+          }
+        </div>
         <div class="feed-config-card">
           <p class="eyebrow-label">following feed</p>
           <h3>Load your real Farcaster feed</h3>
@@ -2149,13 +2314,13 @@ function renderProfileOverlay(state: AppState): string {
           </div>
         </div>
         <div class="feed-config-card">
-          <p class="eyebrow-label">write access</p>
-          <h3>Post and react on Farcaster</h3>
-          <p class="eyebrow-label">${escapeHtml(hasWriteAccess ? "Connected" : effectiveWriteClientId ? "Client ID ready" : "Needs setup")}</p>
+          <p class="eyebrow-label">hosted signer fallback</p>
+          <h3>Optional Neynar write access</h3>
+          <p class="eyebrow-label">${escapeHtml(hasHostedWriteAccess ? "Connected" : effectiveWriteClientId ? "Client ID ready" : "Needs setup")}</p>
           <p class="support-copy">${escapeHtml(writeHelperText)}</p>
           <div class="action-grid">
-            <button class="primary-button" type="button" data-action="open-write-access">
-              ${escapeHtml(hasWriteAccess ? "Reconnect write access" : "Connect write access")}
+            <button class="secondary-button" type="button" data-action="open-write-access">
+              ${escapeHtml(hasHostedWriteAccess ? "Reconnect hosted signer" : "Connect hosted signer")}
             </button>
           </div>
         </div>
@@ -2249,7 +2414,7 @@ function renderComposerOverlay(state: AppState, ui: UiState): string {
   const canPublish = draftLength > 0;
   const replyTarget = getReplyTargetCast(state, ui);
   const publishLabel = publishButtonLabel(ui);
-  const publishSupport = publishSupportCopy(ui);
+  const publishSupport = publishSupportCopy(ui, state.farcaster.profile);
 
   return `
     <div class="overlay-backdrop">
@@ -2282,7 +2447,7 @@ function renderComposerOverlay(state: AppState, ui: UiState): string {
               <strong>${escapeHtml(profileName(state.farcaster.profile))}</strong>
               <p class="support-copy">
                 Drafts save locally on this device. ${
-                  hasRealFarcasterWriteConfigured()
+                  hasRealFarcasterWriteConfigured(state.farcaster.profile)
                     ? "Published casts are added to the Hypecast feed right away."
                     : "Connect write access on the first post to publish on Farcaster."
                 }
@@ -2320,6 +2485,226 @@ function renderComposerOverlay(state: AppState, ui: UiState): string {
   `;
 }
 
+function renderAccountAccessOverlay(state: AppState, ui: UiState): string {
+  if (ui.overlay !== "account-access") {
+    return "";
+  }
+
+  const activeSigner = activeSignerForProfile(state.farcaster.profile);
+  const inspection = ui.accountInspection;
+  const isBusy = ui.accountAccessStatus !== "idle";
+  const fundingQrCode = sanitizeImageUrl(ui.accountFundingQrCode, {
+    allowDataImage: true
+  });
+  const pendingIntentLabel =
+    ui.pendingWriteIntent?.kind === "publish-cast"
+      ? "Unlock an account to publish this cast."
+      : ui.pendingWriteIntent?.kind === "delete-cast"
+        ? "Unlock this account to delete its cast from Farcaster."
+        : ui.pendingWriteIntent?.reactionType === "like"
+        ? "Unlock an account to like this cast."
+        : ui.pendingWriteIntent?.reactionType === "recast"
+          ? "Unlock an account to recast this cast."
+          : "Use a custody key locally or create a new Farcaster account.";
+  const canRegister = Boolean(
+    inspection &&
+      inspection.fid === null &&
+      inspection.balanceWei >= inspection.recommendedBalanceWei &&
+      ui.accountBackupConfirmed &&
+      !isBusy
+  );
+
+  return `
+    <div class="overlay-backdrop">
+      <section class="overlay-sheet account-access-sheet" role="dialog" aria-modal="true" aria-label="Farcaster account access">
+        <div class="sheet-head">
+          <div>
+            <p class="eyebrow-label">local account access</p>
+            <h2>${activeSigner ? "Farcaster signing is unlocked" : inspection?.fid ? `Unlock FID ${escapeHtml(String(inspection.fid))}` : inspection ? "Register a Farcaster account" : ui.accountAddress ? "Review custody account" : "Use your own Farcaster keys"}</h2>
+            <p class="support-copy">${escapeHtml(pendingIntentLabel)}</p>
+          </div>
+          <button class="icon-button" type="button" data-action="close-overlay" aria-label="Close account access">
+            ${renderIcon("close")}
+          </button>
+        </div>
+
+        ${
+          activeSigner
+            ? `
+              <div class="account-success-card">
+                <p class="eyebrow-label">scoped signer active</p>
+                <strong>FID ${escapeHtml(String(activeSigner.fid))}</strong>
+                <p class="support-copy">Custody ${escapeHtml(shortAddress(activeSigner.custodyAddress))} authorized a browser app signer. Locking clears the decrypted signer from memory.</p>
+              </div>
+              ${
+                ui.accountAccessError
+                  ? `<div class="write-access-error" role="status"><strong>The Farcaster action did not complete.</strong><p class="support-copy">${escapeHtml(ui.accountAccessError)}</p></div>`
+                  : ""
+              }
+              <div class="action-grid">
+                ${ui.pendingWriteIntent ? `<button class="primary-button" type="button" data-action="retry-pending-write">Retry Farcaster action</button>` : ""}
+                <button class="secondary-button" type="button" data-action="open-profile">Account details</button>
+                <button class="secondary-button" type="button" data-action="lock-local-signer">Lock signer</button>
+              </div>
+            `
+            : !ui.accountAddress
+              ? `
+                <div class="custody-warning">
+                  <strong>Your custody key controls the entire Farcaster account.</strong>
+                  <p class="support-copy">Hypecast uses it in this tab only to unlock or authorize a scoped Ed25519 app signer. It never saves the raw key or recovery phrase. Use a trusted device and close the tab when finished.</p>
+                </div>
+                <label class="write-access-label" for="account-secret">Recovery phrase, custody private key, or backup JSON</label>
+                <label class="secret-field account-secret-field">
+                  <textarea
+                    id="account-secret"
+                    data-input="account-secret"
+                    rows="5"
+                    placeholder="12 or 24 words, 0x-prefixed private key, or Hypecast/Maelstrom backup JSON"
+                    autocomplete="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                  ></textarea>
+                </label>
+                ${
+                  ui.accountAccessError
+                    ? `<div class="write-access-error" role="status"><strong>Couldn’t inspect that custody account.</strong><p class="support-copy">${escapeHtml(ui.accountAccessError)}</p></div>`
+                    : ""
+                }
+                <div class="action-grid">
+                  <button class="primary-button" type="button" data-action="inspect-account-secret" ${isBusy ? "disabled" : ""}>
+                    ${escapeHtml(ui.accountAccessStatus === "inspecting" ? "Checking Optimism..." : "Review imported account")}
+                  </button>
+                  <button class="secondary-button" type="button" data-action="generate-farcaster-account" ${isBusy ? "disabled" : ""}>Create a new account</button>
+                </div>
+                <div class="account-alternate-actions">
+                  <button class="text-button" type="button" data-action="farcaster">Sign in read-only with another Farcaster app</button>
+                  ${ui.pendingWriteIntent?.kind === "delete-cast" ? "" : `<button class="text-button" type="button" data-action="open-hosted-write-access">Use a hosted Neynar signer instead</button>`}
+                </div>
+              `
+              : `
+                <div class="account-address-card">
+                  <div>
+                    <p class="eyebrow-label">custody address</p>
+                    <strong class="account-address-value">${escapeHtml(ui.accountAddress)}</strong>
+                  </div>
+                  <button class="secondary-button compact-button" type="button" data-action="copy-account-address">Copy</button>
+                </div>
+                ${
+                  ui.accountGeneratedMnemonic
+                    ? `
+                      <div class="custody-warning is-critical">
+                        <strong>Save these recovery words before funding this address.</strong>
+                        <p class="support-copy">Anyone with these words controls this FID. Hypecast will remove them from the page when this sheet closes.</p>
+                      </div>
+                      <ol class="mnemonic-grid" aria-label="New account recovery phrase">
+                        ${ui.accountGeneratedMnemonic
+                          .split(" ")
+                          .map((word, index) => `<li><span>${index + 1}</span>${escapeHtml(word)}</li>`)
+                          .join("")}
+                      </ol>
+                    `
+                    : ""
+                }
+                ${
+                  ui.accountAccessError
+                    ? `<div class="write-access-error" role="status"><strong>Account action paused.</strong><p class="support-copy">${escapeHtml(ui.accountAccessError)}</p></div>`
+                    : ""
+                }
+                ${
+                  ui.accountAccessNotice
+                    ? `<div class="account-success-card" role="status"><p class="support-copy">${escapeHtml(ui.accountAccessNotice)}</p></div>`
+                    : ""
+                }
+                ${
+                  !inspection
+                    ? `
+                      <div class="action-grid">
+                        <button class="primary-button" type="button" data-action="refresh-account-inspection" ${isBusy ? "disabled" : ""}>
+                          ${escapeHtml(ui.accountAccessStatus === "inspecting" ? "Checking Optimism..." : "Check FID and funding")}
+                        </button>
+                        <button class="secondary-button" type="button" data-action="download-custody-backup">Download plaintext backup</button>
+                        <button class="secondary-button" type="button" data-action="return-account-import">Use a different key</button>
+                      </div>
+                    `
+                    : inspection.fid
+                      ? `
+                        <div class="mini-list account-session-list">
+                          <div class="mini-item"><span>Registered FID</span><strong>${escapeHtml(String(inspection.fid))}</strong></div>
+                          <div class="mini-item"><span>Optimism balance</span><strong>${escapeHtml(formatEthAmount(inspection.balanceWei))}</strong></div>
+                        </div>
+                        <p class="support-copy">Unlocking decrypts an existing Hypecast app signer or asks this custody key to authorize a new scoped signer. The custody key itself is not saved.</p>
+                        <div class="action-grid">
+                          <button class="primary-button" type="button" data-action="connect-local-account" ${isBusy ? "disabled" : ""}>
+                            ${escapeHtml(ui.accountAccessStatus === "connecting" ? "Authorizing signer..." : `Unlock FID ${inspection.fid}`)}
+                          </button>
+                          <button class="secondary-button" type="button" data-action="return-account-import">Use a different key</button>
+                        </div>
+                      `
+                      : `
+                        <div class="registration-steps">
+                          <div class="mini-list account-session-list">
+                            <div class="mini-item"><span>Network</span><strong>Optimism mainnet</strong></div>
+                            <div class="mini-item"><span>Current balance</span><strong>${escapeHtml(formatEthAmount(inspection.balanceWei))}</strong></div>
+                            <div class="mini-item"><span>Live IdGateway price</span><strong>${escapeHtml(formatEthAmount(inspection.registrationPriceWei))}</strong></div>
+                            <div class="mini-item"><span>Recommended total</span><strong>${escapeHtml(formatEthAmount(inspection.recommendedBalanceWei))}</strong></div>
+                            <div class="mini-item"><span>Still needed</span><strong>${escapeHtml(formatEthAmount(inspection.recommendedFundingWei))}</strong></div>
+                          </div>
+                          ${
+                            fundingQrCode
+                              ? `
+                                <div class="sheet-qr-card funding-qr-card">
+                                  <img src="${escapeAttribute(fundingQrCode)}" alt="Fund custody address on Optimism QR code" />
+                                  <div>
+                                    <p class="eyebrow-label">fund on Optimism</p>
+                                    <p class="support-copy">Send native ETH on chain 10 to the custody address. Registration cannot proceed until the live balance covers price plus the gas buffer.</p>
+                                  </div>
+                                </div>
+                              `
+                              : ""
+                          }
+                          <label class="write-access-label" for="account-recovery">Recovery address</label>
+                          <label class="secret-field">
+                            <input id="account-recovery" data-field="account-recovery" type="text" value="${escapeAttribute(ui.accountRecoveryDraft)}" autocomplete="off" autocapitalize="off" spellcheck="false" />
+                          </label>
+                          <p class="support-copy">The official Farcaster recovery proxy is the default. An advanced replacement can recover or transfer the account, so only enter an address you deliberately trust.</p>
+                          <div class="action-grid">
+                            <button class="secondary-button" type="button" data-action="download-custody-backup">Download plaintext backup</button>
+                            <button class="secondary-button" type="button" data-action="copy-custody-backup">Copy plaintext backup</button>
+                            <button class="secondary-button" type="button" data-action="refresh-account-inspection" ${isBusy ? "disabled" : ""}>Refresh price and balance</button>
+                          </div>
+                          <label class="backup-confirmation">
+                            <input type="checkbox" data-field="account-backup-confirmed" ${ui.accountBackupConfirmed ? "checked" : ""} />
+                            <span>I saved the custody backup offline and understand Hypecast cannot recover it.</span>
+                          </label>
+                          <div class="custody-warning is-critical">
+                            <strong>Registration sends a real, irreversible Optimism transaction.</strong>
+                            <p class="support-copy">Hypecast will re-read the live price and balance, then sign IdGateway.register with this custody key. It will verify the receipt and FID before continuing.</p>
+                          </div>
+                          <button class="primary-button full-width-button" type="button" data-action="register-farcaster-account" ${canRegister ? "" : "disabled"}>
+                            ${escapeHtml(ui.accountAccessStatus === "registering" ? "Registering on Optimism..." : "Register account on Optimism")}
+                          </button>
+                          ${
+                            inspection.balanceWei < inspection.recommendedBalanceWei
+                              ? `<p class="support-copy account-gate-copy">Fund at least ${escapeHtml(formatEthAmount(inspection.recommendedFundingWei))} more on Optimism, then refresh.</p>`
+                              : !ui.accountBackupConfirmed
+                                ? `<p class="support-copy account-gate-copy">Confirm the offline backup before registration.</p>`
+                                : ""
+                          }
+                          ${
+                            ui.accountRegistrationTx
+                              ? `<a class="text-link" href="${escapeAttribute(`https://optimistic.etherscan.io/tx/${ui.accountRegistrationTx}`)}" target="_blank" rel="noreferrer">View registration transaction</a>`
+                              : ""
+                          }
+                        </div>
+                      `
+                }
+              `
+        }
+      </section>
+    </div>
+  `;
+}
+
 function renderWriteAccessOverlay(ui: UiState): string {
   if (ui.overlay !== "write-access") {
     return "";
@@ -2337,7 +2722,9 @@ function renderWriteAccessOverlay(ui: UiState): string {
   const intentLabel =
     pendingIntent?.kind === "publish-cast"
       ? "Publish your cast to Farcaster."
-      : pendingIntent?.reactionType === "like"
+      : pendingIntent?.kind === "delete-cast"
+        ? "This hosted signer fallback cannot delete casts; unlock the local custody account instead."
+        : pendingIntent?.reactionType === "like"
         ? "Like this cast on Farcaster."
         : pendingIntent?.reactionType === "recast"
           ? "Recast this cast on Farcaster."
@@ -2515,6 +2902,8 @@ function renderCastMenuOverlay(state: AppState, ui: UiState): string {
 
 function renderOverlay(state: AppState, ui: UiState): string {
   switch (ui.overlay) {
+    case "account-access":
+      return renderAccountAccessOverlay(state, ui);
     case "write-access":
       return renderWriteAccessOverlay(ui);
     case "cast-menu":
@@ -2524,7 +2913,7 @@ function renderOverlay(state: AppState, ui: UiState): string {
     case "search":
       return renderSearchOverlay(state, ui);
     case "profile":
-      return renderProfileOverlay(state);
+      return renderProfileOverlay(state, ui);
     case "settings":
       return renderSettingsOverlay(state);
     case "composer":
@@ -2635,9 +3024,70 @@ export function createApp(root: HTMLDivElement): void {
   };
   let walletSession: WalletSession | null = null;
   let farcasterWriteSession: FarcasterWriteSession | null = loadStoredFarcasterWriteSession() ?? null;
+  let transientCustodyAccount: CustodyAccount | null = null;
   let xmtpSession: Awaited<ReturnType<typeof connectXmtp>> | null = null;
   let activeFeedRefreshPromise: Promise<void> | null = null;
   let activeRouteResolutionId = 0;
+  let activeAccountFlowId = 0;
+  let localSignerIdleTimeoutId: number | undefined;
+
+  const clearLocalSignerIdleTimeout = () => {
+    if (localSignerIdleTimeoutId !== undefined) {
+      window.clearTimeout(localSignerIdleTimeoutId);
+      localSignerIdleTimeoutId = undefined;
+    }
+  };
+
+  const scheduleLocalSignerIdleTimeout = () => {
+    clearLocalSignerIdleTimeout();
+
+    if (!hasActiveFarcasterSigner()) {
+      return;
+    }
+
+    localSignerIdleTimeoutId = window.setTimeout(() => {
+      localSignerIdleTimeoutId = undefined;
+      lockActiveFarcasterSigner();
+      ui.accountAccessStatus = "idle";
+      ui.accountAccessNotice = "Local signing locked after 15 minutes of inactivity.";
+
+      if (ui.overlay === "profile" || ui.overlay === "account-access") {
+        render(undefined, { preserveShellScroll: true });
+      }
+    }, LOCAL_SIGNER_IDLE_TIMEOUT_MS);
+  };
+
+  const lockLocalSignerForSafety = () => {
+    clearLocalSignerIdleTimeout();
+    lockActiveFarcasterSigner();
+  };
+
+  const getLocalSignerForVisibleProfile = () => {
+    const signer = getActiveFarcasterSignerSession();
+
+    if (!signer) {
+      return undefined;
+    }
+
+    if (signer.fid !== state.farcaster.profile?.fid) {
+      lockLocalSignerForSafety();
+      return undefined;
+    }
+
+    return signer;
+  };
+
+  const requireSameLocalSigner = (
+    expectedSigner: NonNullable<ReturnType<typeof getActiveFarcasterSignerSession>>
+  ) => {
+    const signer = getLocalSignerForVisibleProfile();
+
+    if (!signer || signer.fid !== expectedSigner.fid) {
+      throw new Error("Unlock the local signer for the visible Farcaster account before writing.");
+    }
+
+    return signer;
+  };
 
   const isPullToRefreshEnabled = () => ui.activePane === "home" && ui.overlay === "none";
 
@@ -2725,7 +3175,9 @@ export function createApp(root: HTMLDivElement): void {
           ? '[data-input="composer"]'
           : focusTarget.field === "write-client-id"
             ? '[data-input="write-client-id"]'
-            : '[data-input="write-api-key"]';
+            : focusTarget.field === "write-api-key"
+              ? '[data-input="write-api-key"]'
+              : '[data-input="account-secret"]';
     const element = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector);
 
     if (!element) {
@@ -2790,6 +3242,51 @@ export function createApp(root: HTMLDivElement): void {
     ui.routedCast = undefined;
   };
 
+  const resetAccountAccess = () => {
+    activeAccountFlowId += 1;
+    transientCustodyAccount = null;
+    ui.accountAccessSource = "import";
+    ui.accountAccessStatus = "idle";
+    ui.accountAccessError = undefined;
+    ui.accountAccessNotice = undefined;
+    ui.accountAddress = undefined;
+    ui.accountInspection = undefined;
+    ui.accountRecoveryDraft = DEFAULT_FARCASTER_RECOVERY_ADDRESS;
+    ui.accountFundingQrCode = undefined;
+    ui.accountBackupConfirmed = false;
+    ui.accountGeneratedMnemonic = undefined;
+    ui.accountRegistrationTx = undefined;
+  };
+
+  const isCurrentAccountFlow = (flowId: number, account: CustodyAccount): boolean =>
+    flowId === activeAccountFlowId &&
+    transientCustodyAccount === account &&
+    ui.overlay === "account-access";
+
+  const openAccountAccessOverlay = (
+    intent?: PendingWriteIntent,
+    options: RenderOptions & { error?: string } = {}
+  ) => {
+    resetAccountAccess();
+    ui.pendingWriteIntent = intent;
+    ui.accountAccessError = options.error;
+    ui.overlay = "account-access";
+    ui.mediaViewer = undefined;
+    ui.activeCastId = undefined;
+    render(
+      getLocalSignerForVisibleProfile()
+        ? undefined
+        : {
+            field: "account-secret",
+            start: 0,
+            end: 0
+          },
+      {
+        preserveShellScroll: options.preserveShellScroll ?? true
+      }
+    );
+  };
+
   const syncWriteAccessDraftsFromStorage = () => {
     ui.writeAccessClientIdDraft = loadStoredNeynarClientId() || getDefaultNeynarClientId();
     ui.writeAccessApiKeyDraft = loadStoredNeynarApiKey();
@@ -2851,22 +3348,42 @@ export function createApp(root: HTMLDivElement): void {
     return farcasterWriteSession;
   };
 
-  const applyConnectedFarcasterProfile = (profile: FarcasterProfile) => {
+  const applyConnectedFarcasterProfile = (
+    profile: FarcasterProfile,
+    connection: { channelUrl?: string; qrCodeDataUrl?: string } = {}
+  ) => {
+    const activeSigner = getActiveFarcasterSignerSession();
+
+    if (activeSigner && activeSigner.fid !== profile.fid) {
+      lockLocalSignerForSafety();
+    }
+
     const nextProfile = mergeFarcasterProfile(state.farcaster.profile, profile);
     state.farcaster = {
       status: "connected",
+      ...connection,
       profile: nextProfile
     };
     saveStoredProfile(nextProfile);
   };
 
   const closeOverlay = (options: RenderOptions = {}) => {
+    const closingOverlay = ui.overlay;
     ui.overlay = "none";
     ui.mediaViewer = undefined;
     ui.activeCastId = undefined;
     ui.pendingWriteIntent = undefined;
     ui.writeAccessStatus = "idle";
     ui.writeAccessError = undefined;
+
+    if (closingOverlay === "account-access") {
+      resetAccountAccess();
+    } else if (closingOverlay === "profile") {
+      ui.accountAccessStatus = "idle";
+      ui.accountAccessError = undefined;
+      ui.accountAccessNotice = undefined;
+    }
+
     render(undefined, options);
   };
 
@@ -2969,11 +3486,49 @@ export function createApp(root: HTMLDivElement): void {
     textArea.style.opacity = "0";
     document.body.append(textArea);
     textArea.select();
-    document.execCommand("copy");
-    textArea.remove();
+    let copied = false;
+
+    try {
+      copied = document.execCommand("copy");
+    } finally {
+      textArea.remove();
+    }
+
+    if (!copied) {
+      throw new Error("The browser rejected the clipboard copy command.");
+    }
   };
 
   const buildShareableCastLink = (cast: FeedCast) => buildCastRouteUrl(window.location.href, cast);
+
+  const resolveDirectCastTarget = async (cast: FeedCast): Promise<FarcasterCastIdInput> => {
+    const knownTarget = directCastTargetForCast(cast);
+
+    if (knownTarget) {
+      return knownTarget;
+    }
+
+    const castHash = /^0x[0-9a-f]{40}$/i.test(cast.id) ? cast.id : undefined;
+    const castUrl = sanitizeLinkUrl(cast.permalink);
+
+    if (!castHash && !castUrl) {
+      throw new Error("This item does not expose a resolvable Farcaster cast identifier.");
+    }
+
+    const resolvedCast = await loadCastByIdentifier({
+      identifier: castHash ?? castUrl ?? "",
+      type: castHash ? "hash" : "url",
+      viewerFid: state.farcaster.profile?.fid,
+      neynarApiKey: getEffectiveNeynarApiKey()
+    });
+    const resolvedTarget = directCastTargetForCast(resolvedCast);
+
+    if (!resolvedTarget) {
+      throw new Error("Farcaster lookup did not return the cast hash and author FID required for signing.");
+    }
+
+    return resolvedTarget;
+  };
 
   const resolveCastRouteFromLocation = async (options: RenderOptions = {}) => {
     const routeResolutionId = ++activeRouteResolutionId;
@@ -3163,7 +3718,7 @@ export function createApp(root: HTMLDivElement): void {
     };
   };
 
-  const executePendingWriteIntent = async (session: FarcasterWriteSession) => {
+  const executePendingWriteIntent = async (session?: FarcasterWriteSession) => {
     const pendingIntent = ui.pendingWriteIntent;
     ui.pendingWriteIntent = undefined;
 
@@ -3176,7 +3731,372 @@ export function createApp(root: HTMLDivElement): void {
       return;
     }
 
+    if (pendingIntent.kind === "delete-cast") {
+      await handleDeleteCast(pendingIntent.castId);
+      return;
+    }
+
     await handleReaction(pendingIntent.castId, pendingIntent.reactionType, session);
+  };
+
+  const accountRecoveryFromSheet = (): Address => {
+    const input = root.querySelector<HTMLInputElement>('[data-field="account-recovery"]');
+    return (input?.value.trim() || ui.accountRecoveryDraft) as Address;
+  };
+
+  const inspectTransientAccount = async (): Promise<OptimismAccountInspection | undefined> => {
+    if (!transientCustodyAccount) {
+      ui.accountAccessError = "Import or generate a custody account first.";
+      render(undefined, { preserveShellScroll: true });
+      return undefined;
+    }
+
+    const account = transientCustodyAccount;
+    const flowId = activeAccountFlowId;
+    const recoveryAddress = accountRecoveryFromSheet();
+    ui.accountRecoveryDraft = recoveryAddress;
+    ui.accountAccessStatus = "inspecting";
+    ui.accountAccessError = undefined;
+    ui.accountAccessNotice = undefined;
+    render(undefined, { preserveShellScroll: true });
+
+    try {
+      const inspection = await inspectAccountOnOptimism(
+        account,
+        recoveryAddress
+      );
+
+      if (!isCurrentAccountFlow(flowId, account)) {
+        return undefined;
+      }
+
+      const fundingUri = `ethereum:${inspection.address}@${inspection.chainId}`;
+      const fundingQrCode = await createChannelQrCode(fundingUri);
+
+      if (!isCurrentAccountFlow(flowId, account)) {
+        return undefined;
+      }
+
+      ui.accountInspection = inspection;
+      ui.accountAddress = inspection.address;
+      ui.accountRecoveryDraft = inspection.recoveryAddress;
+      ui.accountFundingQrCode = fundingQrCode;
+      ui.accountAccessStatus = "idle";
+      render(undefined, { preserveShellScroll: true });
+      return inspection;
+    } catch (error) {
+      if (!isCurrentAccountFlow(flowId, account)) {
+        return undefined;
+      }
+
+      ui.accountAccessStatus = "idle";
+      ui.accountAccessError =
+        error instanceof Error ? error.message : "The Optimism account check failed.";
+      render(undefined, { preserveShellScroll: true });
+      return undefined;
+    }
+  };
+
+  const handleInspectAccountSecret = async () => {
+    const input = root.querySelector<HTMLTextAreaElement>('[data-input="account-secret"]');
+    const rawSecret = input?.value ?? "";
+
+    if (input) {
+      input.value = "";
+    }
+
+    try {
+      const account = parseCustodySecret(rawSecret);
+      resetAccountAccess();
+      transientCustodyAccount = account;
+      ui.accountAccessSource = "import";
+      ui.accountAddress = account.address;
+      await inspectTransientAccount();
+    } catch (error) {
+      resetAccountAccess();
+      ui.accountAccessError =
+        error instanceof Error ? error.message : "The custody secret could not be parsed.";
+      render(
+        { field: "account-secret", start: 0, end: 0 },
+        { preserveShellScroll: true }
+      );
+    }
+  };
+
+  const handleGenerateFarcasterAccount = async () => {
+    try {
+      const account = generateCustodyAccount();
+      resetAccountAccess();
+      transientCustodyAccount = account;
+      ui.overlay = "account-access";
+      ui.accountAccessSource = "generated";
+      ui.accountAddress = account.address;
+      ui.accountGeneratedMnemonic = account.mnemonic;
+      await inspectTransientAccount();
+    } catch (error) {
+      resetAccountAccess();
+      ui.overlay = "account-access";
+      ui.accountAccessError =
+        error instanceof Error ? error.message : "A custody account could not be generated.";
+      render(undefined, { preserveShellScroll: true });
+    }
+  };
+
+  const connectTransientAccount = async (
+    fid: number,
+    expectedAccount = transientCustodyAccount,
+    expectedFlowId = activeAccountFlowId,
+    registrationTransactionHash?: Hex
+  ) => {
+    if (!expectedAccount || !isCurrentAccountFlow(expectedFlowId, expectedAccount)) {
+      throw new Error("The custody key is no longer available. Import it again to continue.");
+    }
+
+    ui.accountAccessStatus = "connecting";
+    ui.accountAccessError = undefined;
+    render(undefined, { preserveShellScroll: true });
+
+    const account = expectedAccount;
+    await connectLocalFarcasterAccount({
+      fid,
+      custodyPrivateKey: account.privateKey,
+      custodyAddress: account.address,
+      registrationTransactionHash,
+      neynarApiKey: getEffectiveNeynarApiKey()
+    });
+    scheduleLocalSignerIdleTimeout();
+    const loadedProfile = await fetchFarcasterProfileByFid(fid);
+
+    if (!isCurrentAccountFlow(expectedFlowId, account)) {
+      lockLocalSignerForSafety();
+      return;
+    }
+
+    applyConnectedFarcasterProfile({
+      ...loadedProfile,
+      fid,
+      custody: account.address
+    });
+
+    transientCustodyAccount = null;
+    ui.accountGeneratedMnemonic = undefined;
+    ui.accountAccessStatus = "idle";
+    ui.accountAccessError = undefined;
+    ui.overlay = "none";
+    render(undefined, { preserveShellScroll: true });
+    void refreshFeedSnapshot();
+    await executePendingWriteIntent();
+  };
+
+  const handleConnectLocalAccount = async () => {
+    const fid = ui.accountInspection?.fid;
+    const account = transientCustodyAccount;
+    const flowId = activeAccountFlowId;
+
+    if (!fid || !account) {
+      ui.accountAccessError = "This custody address does not have a registered FID yet.";
+      render(undefined, { preserveShellScroll: true });
+      return;
+    }
+
+    try {
+      await connectTransientAccount(fid, account, flowId);
+    } catch (error) {
+      if (!isCurrentAccountFlow(flowId, account)) {
+        return;
+      }
+
+      ui.accountAccessStatus = "idle";
+      ui.accountAccessError =
+        error instanceof Error ? error.message : "The local Farcaster signer could not be unlocked.";
+      render(undefined, { preserveShellScroll: true });
+    }
+  };
+
+  const handleRegisterFarcasterAccount = async () => {
+    if (!transientCustodyAccount) {
+      ui.accountAccessError = "The custody key is no longer available. Import it again to continue.";
+      render(undefined, { preserveShellScroll: true });
+      return;
+    }
+
+    const account = transientCustodyAccount;
+    const flowId = activeAccountFlowId;
+
+    if (!ui.accountBackupConfirmed) {
+      ui.accountAccessError = "Save and confirm the custody backup before registration.";
+      render(undefined, { preserveShellScroll: true });
+      return;
+    }
+
+    const recoveryAddress = accountRecoveryFromSheet();
+    ui.accountRecoveryDraft = recoveryAddress;
+    ui.accountAccessStatus = "registering";
+    ui.accountAccessError = undefined;
+    ui.accountAccessNotice = undefined;
+    render(undefined, { preserveShellScroll: true });
+
+    try {
+      const latestInspection = await inspectAccountOnOptimism(
+        account,
+        recoveryAddress
+      );
+
+      if (!isCurrentAccountFlow(flowId, account)) {
+        return;
+      }
+
+      ui.accountInspection = latestInspection;
+
+      if (latestInspection.fid) {
+        ui.accountAccessNotice = `This address is already registered as FID ${latestInspection.fid}.`;
+        await connectTransientAccount(latestInspection.fid, account, flowId);
+        return;
+      }
+
+      if (latestInspection.balanceWei < latestInspection.recommendedBalanceWei) {
+        throw new Error(
+          `Fund ${formatEthAmount(latestInspection.recommendedFundingWei)} more on Optimism, then refresh before registering.`
+        );
+      }
+
+      const registration = await registerAccountOnOptimism(
+        account,
+        recoveryAddress
+      );
+
+      if (!isCurrentAccountFlow(flowId, account)) {
+        return;
+      }
+
+      ui.accountRegistrationTx = registration.receipt.transactionHash;
+      ui.accountInspection = {
+        ...latestInspection,
+        fid: registration.fid,
+        registrationPriceWei: registration.registrationPriceWei
+      };
+      ui.accountAccessNotice = `Optimism confirmed FID ${registration.fid}. Authorizing the scoped Hypecast signer now.`;
+      render(undefined, { preserveShellScroll: true });
+      await connectTransientAccount(
+        registration.fid,
+        account,
+        flowId,
+        registration.receipt.transactionHash
+      );
+    } catch (error) {
+      if (!isCurrentAccountFlow(flowId, account)) {
+        return;
+      }
+
+      ui.accountAccessStatus = "idle";
+      ui.accountAccessError =
+        error instanceof Error ? error.message : "Farcaster registration could not be completed.";
+      render(undefined, { preserveShellScroll: true });
+    }
+  };
+
+  const downloadCustodyBackup = () => {
+    if (!transientCustodyAccount) {
+      return;
+    }
+
+    ui.accountRecoveryDraft = accountRecoveryFromSheet();
+    const backup = createCustodyBackupDownload(transientCustodyAccount);
+    const objectUrl = URL.createObjectURL(
+      new Blob([backup.contents], { type: backup.mimeType })
+    );
+    triggerBrowserDownload(objectUrl, backup.fileName);
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+    ui.accountAccessNotice = "Plaintext custody backup downloaded. Move it to secure offline storage.";
+    render(undefined, { preserveShellScroll: true });
+  };
+
+  const copyCustodyBackup = async () => {
+    if (!transientCustodyAccount) {
+      return;
+    }
+
+    ui.accountRecoveryDraft = accountRecoveryFromSheet();
+    try {
+      await copyTextToClipboard(createCustodyBackupJson(transientCustodyAccount));
+      ui.accountAccessNotice = "Plaintext custody backup copied. Clear your clipboard after storing it safely.";
+      ui.accountAccessError = undefined;
+    } catch {
+      ui.accountAccessNotice = undefined;
+      ui.accountAccessError = "The custody backup could not be copied. Download it instead.";
+    }
+    render(undefined, { preserveShellScroll: true });
+  };
+
+  const handleSaveLocalProfile = async () => {
+    const signer = getLocalSignerForVisibleProfile();
+
+    if (!signer) {
+      openAccountAccessOverlay(undefined, {
+        error: "Unlock the local signer before updating this profile."
+      });
+      return;
+    }
+
+    const displayName =
+      root.querySelector<HTMLInputElement>('[data-field="profile-display-name"]')?.value.trim() ?? "";
+    const bio =
+      root.querySelector<HTMLTextAreaElement>('[data-field="profile-bio"]')?.value.trim() ?? "";
+    const pfpUrl =
+      root.querySelector<HTMLInputElement>('[data-field="profile-pfp"]')?.value.trim() ?? "";
+
+    if (pfpUrl && !sanitizeImageUrl(pfpUrl)) {
+      ui.accountAccessError = "Profile images must use a safe HTTP or HTTPS URL.";
+      render(undefined, { preserveShellScroll: true });
+      return;
+    }
+
+    const currentProfile = state.farcaster.profile;
+    const updates = [
+      ...(displayName !== (currentProfile?.displayName ?? "")
+        ? [{ type: "displayName" as const, value: displayName }]
+        : []),
+      ...(bio !== (currentProfile?.bio ?? "") ? [{ type: "bio" as const, value: bio }] : []),
+      ...(pfpUrl !== (currentProfile?.pfpUrl ?? "")
+        ? [{ type: "pfp" as const, value: pfpUrl }]
+        : [])
+    ];
+
+    if (updates.length === 0) {
+      ui.accountAccessNotice = "Profile fields already match Farcaster.";
+      ui.accountAccessError = undefined;
+      render(undefined, { preserveShellScroll: true });
+      return;
+    }
+
+    ui.accountAccessStatus = "saving-profile";
+    ui.accountAccessError = undefined;
+    ui.accountAccessNotice = undefined;
+    render(undefined, { preserveShellScroll: true });
+
+    try {
+      for (const update of updates) {
+        requireSameLocalSigner(signer);
+        await publishSignedProfile(update);
+      }
+
+      applyConnectedFarcasterProfile({
+        fid: signer.fid,
+        custody: signer.custodyAddress,
+        username: currentProfile?.username,
+        displayName,
+        bio,
+        pfpUrl
+      });
+      ui.accountAccessStatus = "idle";
+      ui.accountAccessNotice = "Profile updates were submitted to Farcaster.";
+      render(undefined, { preserveShellScroll: true });
+    } catch (error) {
+      ui.accountAccessStatus = "idle";
+      ui.accountAccessError =
+        error instanceof Error ? error.message : "The profile update could not be published.";
+      render(undefined, { preserveShellScroll: true });
+    }
   };
 
   const handleWriteAccessConnect = async () => {
@@ -3297,6 +4217,56 @@ export function createApp(root: HTMLDivElement): void {
     return activeFeedRefreshPromise;
   };
 
+  const handleDeleteCast = async (castId: string) => {
+    const cast = getCastById(state, ui, castId);
+
+    if (!cast) {
+      return;
+    }
+
+    const ownsNetworkCast =
+      !cast.localOnly &&
+      /^0x[0-9a-f]{40}$/i.test(cast.id) &&
+      typeof cast.authorFid === "number" &&
+      cast.authorFid === state.farcaster.profile?.fid;
+
+    if (!ownsNetworkCast) {
+      removeCastFromShell(cast);
+      return;
+    }
+
+    const localSigner = getLocalSignerForVisibleProfile();
+
+    if (!localSigner) {
+      openAccountAccessOverlay(
+        { kind: "delete-cast", castId },
+        {
+          error: "Unlock this FID’s custody account before deleting its network cast.",
+          preserveShellScroll: true
+        }
+      );
+      return;
+    }
+
+    try {
+      requireSameLocalSigner(localSigner);
+      await removeSignedCast({ targetHash: cast.id });
+      removeCastFromShell(cast);
+      void refreshFeedSnapshot();
+    } catch (error) {
+      openAccountAccessOverlay(
+        { kind: "delete-cast", castId },
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "The Farcaster cast could not be deleted.",
+          preserveShellScroll: true
+        }
+      );
+    }
+  };
+
   const handleReaction = async (
     castId: string,
     reactionType: "like" | "recast",
@@ -3308,10 +4278,44 @@ export function createApp(root: HTMLDivElement): void {
       return;
     }
 
+    const localSigner = getLocalSignerForVisibleProfile();
+
+    if (localSigner) {
+      try {
+        const target = await resolveDirectCastTarget(cast);
+        requireSameLocalSigner(localSigner);
+        await publishSignedReaction({
+          reactionType,
+          target,
+          remove:
+            reactionType === "like"
+              ? feedInteractionState(ui, castId).liked === true
+              : feedInteractionState(ui, castId).recasted === true
+        });
+        toggleFeedInteraction(castId, reactionType === "like" ? "liked" : "recasted");
+      } catch (error) {
+        openAccountAccessOverlay(
+          {
+            kind: "reaction",
+            castId,
+            reactionType
+          },
+          {
+            error:
+              error instanceof Error
+                ? error.message
+                : "The signed Farcaster reaction could not be completed.",
+            preserveShellScroll: true
+          }
+        );
+      }
+      return;
+    }
+
     const session = sessionOverride ?? currentWriteSession();
 
     if (!session) {
-      openWriteAccessOverlay(
+      openAccountAccessOverlay(
         {
           kind: "reaction",
           castId,
@@ -3381,10 +4385,47 @@ export function createApp(root: HTMLDivElement): void {
       return;
     }
 
+    const localSigner = getLocalSignerForVisibleProfile();
+
+    if (localSigner) {
+      const replyTarget = getReplyTargetCast(state, ui);
+
+      try {
+        const parent = replyTarget ? await resolveDirectCastTarget(replyTarget) : undefined;
+        requireSameLocalSigner(localSigner);
+        const response = await publishSignedCast({
+          text: draft,
+          parent
+        });
+        const nextCast = buildPublishedCast(draft, response.hash);
+
+        ui.localCasts = [nextCast, ...ui.localCasts];
+        saveStoredLocalCasts(ui.localCasts);
+        clearComposerDraft();
+        clearReplyTarget();
+        ui.activePane = "home";
+        ui.activeTimeline = nextCast.channel;
+        ui.overlay = "none";
+        render();
+        void refreshFeedSnapshot();
+      } catch (error) {
+        openAccountAccessOverlay(
+          { kind: "publish-cast" },
+          {
+            error:
+              error instanceof Error
+                ? error.message
+                : "The signed Farcaster cast could not be published."
+          }
+        );
+      }
+      return;
+    }
+
     const session = sessionOverride ?? currentWriteSession();
 
     if (!session) {
-      openWriteAccessOverlay({
+      openAccountAccessOverlay({
         kind: "publish-cast"
       });
       return;
@@ -3492,6 +4533,12 @@ export function createApp(root: HTMLDivElement): void {
     const siweUri = new URL("/auth/farcaster", window.location.origin).toString();
     const existingProfile = state.farcaster.profile;
 
+    if (ui.overlay === "account-access") {
+      resetAccountAccess();
+      ui.pendingWriteIntent = undefined;
+      ui.overlay = "profile";
+    }
+
     setPartialState({
       farcaster: {
         status: "creating",
@@ -3530,15 +4577,11 @@ export function createApp(root: HTMLDivElement): void {
         }
       });
 
-      setPartialState({
-        farcaster: {
-          status: "connected",
-          channelUrl: channel.url,
-          qrCodeDataUrl,
-          profile
-        }
+      applyConnectedFarcasterProfile(profile, {
+        channelUrl: channel.url,
+        qrCodeDataUrl
       });
-      saveStoredProfile(profile);
+      render();
       void refreshFeedSnapshot();
     } catch (error) {
       setPartialState({
@@ -3749,7 +4792,11 @@ export function createApp(root: HTMLDivElement): void {
     true
   );
 
-  root.addEventListener("click", (event) => {
+  root.addEventListener("click", async (event) => {
+    if (getLocalSignerForVisibleProfile()) {
+      scheduleLocalSignerIdleTimeout();
+    }
+
     if (!(event.target instanceof Element)) {
       return;
     }
@@ -3809,12 +4856,20 @@ export function createApp(root: HTMLDivElement): void {
         break;
       case "close-overlay":
         closeOverlay({
-          preserveShellScroll: ui.overlay === "media" || ui.overlay === "cast-menu"
+          preserveShellScroll:
+            ui.overlay === "media" ||
+            ui.overlay === "cast-menu" ||
+            ui.overlay === "account-access"
         });
         break;
       case "profile":
         ui.mediaViewer = undefined;
         ui.activeCastId = undefined;
+        if (ui.overlay !== "profile") {
+          ui.accountAccessStatus = "idle";
+          ui.accountAccessError = undefined;
+          ui.accountAccessNotice = undefined;
+        }
         ui.overlay = ui.overlay === "profile" ? "none" : "profile";
         render();
         break;
@@ -3852,6 +4907,105 @@ export function createApp(root: HTMLDivElement): void {
           preserveShellScroll: true
         });
         break;
+      case "open-account-access":
+        openAccountAccessOverlay(undefined, {
+          preserveShellScroll: true
+        });
+        break;
+      case "open-hosted-write-access": {
+        const pendingIntent = ui.pendingWriteIntent;
+        resetAccountAccess();
+        openWriteAccessOverlay(pendingIntent, {
+          preserveShellScroll: true
+        });
+        break;
+      }
+      case "open-profile":
+        resetAccountAccess();
+        ui.pendingWriteIntent = undefined;
+        ui.overlay = "profile";
+        render(undefined, { preserveShellScroll: true });
+        break;
+      case "inspect-account-secret":
+        void handleInspectAccountSecret();
+        break;
+      case "generate-farcaster-account":
+        void handleGenerateFarcasterAccount();
+        break;
+      case "refresh-account-inspection":
+        void inspectTransientAccount();
+        break;
+      case "return-account-import": {
+        const pendingIntent = ui.pendingWriteIntent;
+        resetAccountAccess();
+        ui.pendingWriteIntent = pendingIntent;
+        ui.overlay = "account-access";
+        render(
+          { field: "account-secret", start: 0, end: 0 },
+          { preserveShellScroll: true }
+        );
+        break;
+      }
+      case "connect-local-account":
+        void handleConnectLocalAccount();
+        break;
+      case "register-farcaster-account":
+        void handleRegisterFarcasterAccount();
+        break;
+      case "download-custody-backup":
+        downloadCustodyBackup();
+        break;
+      case "copy-custody-backup":
+        void copyCustodyBackup();
+        break;
+      case "copy-account-address":
+        if (ui.accountAddress) {
+          ui.accountRecoveryDraft = accountRecoveryFromSheet();
+
+          try {
+            await copyTextToClipboard(ui.accountAddress);
+            ui.accountAccessNotice = "Custody address copied.";
+            ui.accountAccessError = undefined;
+          } catch {
+            ui.accountAccessNotice = undefined;
+            ui.accountAccessError = "The custody address could not be copied. Select and copy it manually.";
+          }
+
+          render(undefined, { preserveShellScroll: true });
+        }
+        break;
+      case "retry-pending-write":
+        void executePendingWriteIntent();
+        break;
+      case "save-local-profile":
+        void handleSaveLocalProfile();
+        break;
+      case "lock-local-signer":
+        lockLocalSignerForSafety();
+        resetAccountAccess();
+        ui.pendingWriteIntent = undefined;
+        ui.overlay = "profile";
+        render(undefined, { preserveShellScroll: true });
+        break;
+      case "forget-local-signer": {
+        clearLocalSignerIdleTimeout();
+        const activeSigner = getActiveFarcasterSignerSession();
+        const fid = activeSigner?.fid ?? state.farcaster.profile?.fid;
+        const custodyAddress = activeSigner?.custodyAddress ?? state.farcaster.profile?.custody;
+
+        if (fid && custodyAddress) {
+          forgetActiveFarcasterSigner({ fid, custodyAddress });
+        } else {
+          forgetActiveFarcasterSigner();
+        }
+
+        resetAccountAccess();
+        ui.pendingWriteIntent = undefined;
+        ui.accountAccessNotice = "The encrypted local signer copy was deleted. This does not revoke its on-network authorization.";
+        ui.overlay = "profile";
+        render(undefined, { preserveShellScroll: true });
+        break;
+      }
       case "settings":
         ui.mediaViewer = undefined;
         ui.activeCastId = undefined;
@@ -3904,14 +5058,7 @@ export function createApp(root: HTMLDivElement): void {
         if (!castId) {
           break;
         }
-
-        {
-          const cast = getCastById(state, ui, castId);
-
-          if (cast) {
-            removeCastFromShell(cast);
-          }
-        }
+        void handleDeleteCast(castId);
         break;
       case "copy-cast-link":
         if (!castId) {
@@ -4099,14 +5246,34 @@ export function createApp(root: HTMLDivElement): void {
     }
   });
 
+  root.addEventListener("change", (event) => {
+    if (!(event.target instanceof HTMLInputElement)) {
+      return;
+    }
+
+    if (event.target.dataset.field === "account-backup-confirmed") {
+      ui.accountRecoveryDraft = accountRecoveryFromSheet();
+      ui.accountBackupConfirmed = event.target.checked;
+      ui.accountAccessError = undefined;
+      render(undefined, { preserveShellScroll: true });
+    }
+  });
+
   window.addEventListener("keydown", (event) => {
+    if (getLocalSignerForVisibleProfile()) {
+      scheduleLocalSignerIdleTimeout();
+    }
+
     if (event.key !== "Escape" || ui.overlay === "none") {
       return;
     }
 
     closeOverlay({
       preserveShellScroll:
-        ui.overlay === "media" || ui.overlay === "cast-menu" || ui.overlay === "write-access"
+        ui.overlay === "media" ||
+        ui.overlay === "cast-menu" ||
+        ui.overlay === "write-access" ||
+        ui.overlay === "account-access"
     });
   });
 
@@ -4125,6 +5292,14 @@ export function createApp(root: HTMLDivElement): void {
 
   window.addEventListener("beforeunload", () => {
     xmtpSession?.client.close();
+    lockLocalSignerForSafety();
+  });
+
+  window.addEventListener("pagehide", lockLocalSignerForSafety);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      lockLocalSignerForSafety();
+    }
   });
 
   window.addEventListener("popstate", () => {
@@ -4139,7 +5314,9 @@ export function createApp(root: HTMLDivElement): void {
     });
   });
 
+  getLocalSignerForVisibleProfile();
   render();
+  scheduleLocalSignerIdleTimeout();
   void resolveCastRouteFromLocation();
   void refreshFeedSnapshot();
 }

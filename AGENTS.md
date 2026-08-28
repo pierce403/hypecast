@@ -17,7 +17,7 @@ Keep this file compact and current. If guidance becomes repetitive, consolidate 
 
 ## Project Overview
 
-Hypecast is a PWA-first Farcaster client scaffold built with vanilla TypeScript, Vite, and a static HTML entrypoint. It also includes wallet-native identity, Farcaster auth, and XMTP browser client integration.
+Hypecast is a PWA-first Farcaster client built with vanilla TypeScript, Vite, and a static HTML entrypoint. It includes local custody-account access and creation, wallet-native identity, Farcaster auth, direct signed Farcaster writes, and XMTP browser client integration.
 
 Current priorities:
 
@@ -50,7 +50,7 @@ Notes:
 - `npm run build` runs `tsc --noEmit && vite build`.
 - `npm run dev -- --host 0.0.0.0` is useful for testing Farcaster sign-in from another device on the same network.
 - `npm run sync:feed` refreshes `public/farcaster-feed.json` from the configured Farcaster SSR profile sources.
-- `npm run test:unit` runs the Vitest suite for shared security helpers and feed normalization.
+- `npm run test:unit` runs the Vitest suite for shared security helpers, feed normalization, custody-account parsing, and signer-vault behavior.
 - `npm run test:e2e` runs the Playwright suite against a local Vite server on `127.0.0.1:4173`.
 - After every push to `main`, check the latest `deploy-pages.yml` run and wait for it to finish with `gh run watch <run-id> --exit-status`.
 - Install the Playwright browser runtime with `npx playwright install chromium` after adding or refreshing the dependency.
@@ -67,6 +67,9 @@ Notes:
 - `src/test-support.ts`: browser-only test seam for Playwright mocks of standalone mode, wallet, Farcaster, and XMTP
 - `src/services/wallet.ts`: injected EVM wallet connection
 - `src/services/farcaster.ts`: Farcaster auth channel creation, QR generation, and verification
+- `src/services/farcaster-account.ts`: custody import/generation, plaintext backup creation, Optimism account inspection, IdGateway registration, and profile lookup
+- `src/services/farcaster-signer.ts`: scoped Ed25519 signer authorization, Snapchain submission/readback, and direct Farcaster message builders
+- `src/services/farcaster-vault.ts`: HKDF/AES-GCM encrypted browser vault for the local Ed25519 signer seed
 - `src/services/xmtp.ts`: XMTP browser client bootstrap
 - `src/styles.css`: global styles and responsive layout
 - `scripts/sync-farcaster-feed.mjs`: refreshes `public/farcaster-feed.json` from public Farcaster SSR profile pages
@@ -93,15 +96,25 @@ Notes:
 - Keep the Home timeline free of synthetic placeholder cards. Account/status controls belong in panes or overlays; the feed itself should start with real snapshot or local casts.
 - Any untrusted remote URL that reaches `href` or `src` should go through `src/services/security.ts` first. Do not interpolate remote URLs directly into markup.
 - `FeedMedia` now supports `href`, `posterSrc`, and `showDetails`. Use `showDetails: false` for plain image/video attachments so the shell does not print redundant source/title captions.
+- Custody recovery phrases and private keys must remain memory-only: clear import controls immediately after parsing, never place raw secrets in app persistence or logs, and discard the transient account whenever the account sheet closes.
+- Keep custody and app signing separate. The custody key authorizes or decrypts the scoped Ed25519 signer; ordinary casts, replies, reactions, profile changes, and deletions should use the app signer.
+- Keep the decrypted local signer bounded: reload, `pagehide`, background visibility, and 15 minutes of inactivity lock it. Do not rely on `beforeunload` alone for mobile/PWA cleanup.
+- Optimism registration must stay explicit: re-read the IdGateway price and balance, require plaintext-backup confirmation, wait for a successful receipt, and read the FID back before enabling writes. Never auto-spend merely because an address is funded.
+- Forward the confirmed IdGateway transaction hash into immediate gasless `KEY_ADD` authorization and preserve it in pending-vault retries; IdRegistry readback does not prove Snapchain has ingested the registration yet.
+- A local signer may write only when its FID matches the visible Farcaster profile. Lock a mismatched signer on SIWF/hosted/local account switches, and do not merge identity fields across different FIDs.
+- Guard every async account inspection/registration completion with the current account-flow token and custody identity. A stale response must never replace a newer funding address, QR code, or mnemonic.
+- Direct cast replies/reactions require a real cast hash plus author FID. Trust a hash-shaped `cast.id`; otherwise resolve through the cast lookup service or block the write. Never extract a hash substring from an untrusted permalink.
 
 ## Dependencies That Matter
 
-- `vite@^7.3.2`
+- `vite@^7.3.6`
 - `vite-plugin-pwa@^1.2.0`
 - `typescript@^6.0.2`
 - `hls.js@^1.6.16`
-- `viem@^2.47.18`
+- `viem@^2.56.0`
 - `@farcaster/auth-client@^0.7.1`
+- `@farcaster/core@^0.20.0`
+- `@scure/bip39@^1.6.0`
 - `@xmtp/browser-sdk@^7.0.0`
 - `qrcode@^1.5.4`
 
@@ -111,13 +124,19 @@ Notes:
 - The XMTP browser SDK emits a large `.wasm` asset. The PWA build excludes `*.wasm` from precache and caches it at runtime instead. If Pages builds start failing with Workbox size-limit errors, inspect `vite.config.ts` before changing anything else.
 - XMTP browser storage uses OPFS. Multiple tabs using the same app instance can conflict.
 - Farcaster auth via the public relay works best when the app is reachable from the signing device. On local dev, use `--host 0.0.0.0` or a tunnel if mobile sign-in is failing.
+- `@farcaster/core` is lazy-loaded into a named `farcaster-core` chunk larger than 2 MiB. `vite.config.ts` must keep that stable chunk name, exclude its JavaScript from Workbox precache, and runtime-cache it. A static core import or removing the Workbox ignore breaks the build's 2 MiB precache gate.
+- Local custody imports accept 12/24-word BIP-39 phrases, 32-byte secp256k1 keys, and Hypecast/Maelstrom JSON fields. Raw custody material is memory-only; the persisted Ed25519 signer seed is AES-GCM encrypted under an HKDF-SHA-256 key derived from the custody key, so reload requires reimport.
+- Persist a newly generated app signer as a pending encrypted vault before submitting its network authorization. Retain that pending vault when submission or readback is ambiguous so retries reuse the same key and nonce; never authorize first and attempt to save the signer afterward.
+- Retain a verified signer vault when a gateway temporarily omits its network record. A single successful-but-incomplete replica response is not proof of revocation and must not trigger replacement-key provisioning.
+- Direct Snapchain submission prefers Neynar when an API key is available and falls back to `https://haatz.quilibrium.com`. Readback is best-effort after a successful submission, so a pending readback is not equivalent to a failed write.
+- Deleting the local signer vault does not revoke its on-network authorization. New IdGateway registrations create an FID but do not claim a username; both signer revocation and username claims need separate Farcaster flows.
 - The XMTP SDK typings currently require a small adapter/cast when creating the client with a custom backend. Be careful upgrading that package, because the runtime behavior and the exported TypeScript shapes are not perfectly aligned.
 - The browser app cannot fetch `https://ssr.farcaster.xyz/*` directly because of cross-origin restrictions. If the home feed needs fresher real data, update the committed snapshot with `npm run sync:feed` instead of wiring runtime fetches to SSR pages.
 - If the bottom nav drifts below the fold again, inspect `html`, `body`, `#app`, `.app-shell`, and `.phone-shell` first. The shell depends on viewport-locked `100dvh` sizing plus `body { overflow: hidden; }`.
 - Keep `.bottom-nav` sticky with `bottom: 0` and `margin-top: auto` so it stays anchored to the phone shell edge while only `.shell-content` scrolls.
 - The personalized following feed currently uses Neynar from the browser with a built-in default client key, and optional browser-local overrides stored in `localStorage`. That is the practical Pages-compatible path today, but it is not the long-term secret-management model.
 - Hypecast now ships with the verified Converge Neynar client key as the built-in default. The account-sheet field is a browser-local override, not a required setup step.
-- Farcaster writes now depend on a Neynar client ID plus the matching API key from the same Neynar app. If the built-in client ID is absent, the first write action must collect both values from the user.
+- Local custody signing is the primary Farcaster write path. Hosted Neynar signing remains optional and still requires a client ID plus the matching API key from the same Neynar app.
 - `index.html` now carries the repo's meta CSP and referrer policy. If new browser capabilities need extra origins or worker behavior, update the policy deliberately instead of loosening it blindly.
 
 ## Deployment Notes
@@ -144,7 +163,7 @@ Notes:
 - The app rerenders the shell from `root.innerHTML`, so any live text inputs added to overlays need explicit focus restoration after render, or typing/search will break.
 - Build metadata is stamped in `vite.config.ts` via `__HYPECAST_BUILD_ID__` and `__HYPECAST_BUILD_TIME__`, and surfaced in the Settings overlay in `src/app.ts`. The shell now renders build time in local browser time with a timezone label while keeping the raw ISO stamp in the element `title`.
 - Playwright defaults now include a mocked feed snapshot; if you change timeline tabs or feed copy, update `tests/feed-fixture.ts` and the corresponding E2E assertions together.
-- The profile/account overlay now owns the Farcaster QR and deep-link handoff. If you change the auth flow, keep that overlay scrollable on mobile so the close button and QR stay reachable.
+- The profile/account overlays own SIWF handoff, custody import, funding QR, backup, and registration. Keep them scrollable on mobile so warnings, close controls, and registration gates remain reachable.
 - If you learn a new repo-specific command, deployment quirk, or SDK hazard, add it here before finishing the task.
 - Runtime feed loading now attempts live Farcaster SSR profile data via CORS-friendly mirrors (`allorigins`, `r.jina.ai`) before falling back to the committed snapshot; successful responses are cached in `localStorage` under `hypecast:feed-snapshot` for a short TTL.
 - Personalized feed loading uses the signed-in Farcaster `fid` plus `hypecast:neynar-api-key` from `localStorage` to request Neynar's following feed directly from the browser. If that request fails, the app falls back to the last matching cached personalized snapshot when available.
@@ -156,9 +175,9 @@ Notes:
 - Fullscreen feed media now uses a fixed viewport overlay from `src/app.ts` with icon-only close/download controls. Keep image/video taps wired through `data-action="open-media-viewer"` and preserve `.shell-content` scroll when opening or closing that overlay.
 - Pull-to-refresh now lives on `.shell-content` in `src/app.ts` and only arms when Home is at scroll-top with no overlay open. Keep the gesture tied to the feed scroller so the bottom nav stays fixed.
 - Like/recast no longer need a full shell rerender; `src/app.ts` now patches those button counts/states in place. If those actions start jumping the feed again, inspect `toggleFeedInteraction()` and `syncFeedInteractionUi()` before touching broader render logic.
-- Cast overflow actions are local-only moderation controls in `src/app.ts`: delete removes the cast from Hypecast, while mute/block hide authors in Hypecast without sending Farcaster network writes.
+- Cast overflow actions mix network and local behavior in `src/app.ts`: an owned network cast is removed with a signed `CastRemove`, while local-only removal, mute, and block remain Hypecast-local moderation controls.
 - Shared cast routing now lives in `src/services/routes.ts` and `src/app.ts`. Keep copied links query-based (`?cast=...&fid=...`) so they work on GitHub Pages, and use the route-resolution token guard so stale async cast lookups cannot clear a newer routed cast.
-- Hypecast now publishes casts plus like/recast reactions through `src/services/neynar.ts`. The first write can collect a Neynar client ID and matching API key, complete popup auth, then resume the original action.
+- Hypecast publishes casts, replies, likes/recasts, profile fields, and owned-cast deletion through `src/services/farcaster-signer.ts` when local signing is unlocked. The first write opens custody import/account creation; `src/services/neynar.ts` remains the hosted fallback.
 - A `signer_uuid` is paired with the Neynar API key that created it. If write auth behaves inconsistently, inspect `hypecast:neynar-client-id`, `hypecast:neynar-api-key`, and `hypecast:farcaster-write-session` together instead of changing just one value.
 - Feed action counts still patch locally after successful writes so the shell updates immediately, but the old purely local reaction state was migrated away by clearing `hypecast:feed-interactions` once under the `hypecast:feed-interactions-v2-migrated` flag.
 - Playwright now runs against both `mobile-chromium` and `desktop-chromium`. If layout changes are viewport-specific, keep assertions for both form factors green.

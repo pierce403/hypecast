@@ -1,7 +1,12 @@
 import { expect, type Page } from "@playwright/test";
 import type { Address } from "viem";
 
-import type { FeedSnapshot } from "../src/types";
+import type {
+  HypecastTestFarcasterAccountQuote,
+  HypecastTestFarcasterRegistration,
+  HypecastTestLocalFarcasterSession
+} from "../src/test-support";
+import type { FarcasterProfile, FeedSnapshot } from "../src/types";
 import { defaultFeedSnapshot } from "./feed-fixture";
 
 interface WalletMockOptions {
@@ -31,6 +36,7 @@ interface FarcasterMockOptions {
     pfpUrl?: string;
     custody?: Address;
   };
+  exactProfile?: FarcasterProfile;
 }
 
 interface XmtpMockOptions {
@@ -68,11 +74,42 @@ interface WriteMockOptions {
   preconnected?: boolean;
 }
 
+interface FarcasterAccountMockOptions {
+  inspectError?: string;
+  inspectDelaysMs?: number[];
+  registerError?: string;
+  quote?: Partial<HypecastTestFarcasterAccountQuote>;
+  quotes?: Partial<HypecastTestFarcasterAccountQuote>[];
+  registration?: Partial<HypecastTestFarcasterRegistration>;
+}
+
+interface LocalWriteMockOptions {
+  apiKey?: string;
+  connectError?: string;
+  castError?: string;
+  reactionError?: string;
+  removeCastError?: string;
+  linkError?: string;
+  profileError?: string;
+  session?: Partial<HypecastTestLocalFarcasterSession>;
+  profile?: {
+    fid?: number;
+    username?: string;
+    displayName?: string;
+    bio?: string;
+    pfpUrl?: string;
+    custody?: Address;
+  };
+  preconnected?: boolean;
+}
+
 export interface HypecastMockOptions {
   isStandalone?: boolean;
   feed?: FeedMockOptions;
   wallet?: WalletMockOptions;
   farcaster?: FarcasterMockOptions;
+  account?: FarcasterAccountMockOptions;
+  localWrite?: LocalWriteMockOptions;
   write?: WriteMockOptions;
   xmtp?: XmtpMockOptions;
 }
@@ -167,8 +204,57 @@ export async function mountApp(
         }
       }
     };
+    const defaultRecoveryAddress = "0x00000000fcb080a4d6c39a9354da9eb9bc104cd7" as Address;
+    const defaultAccountQuote: HypecastTestFarcasterAccountQuote = {
+      address: defaultWallet.address,
+      recoveryAddress: defaultRecoveryAddress,
+      balanceWei: "0",
+      registrationPriceWei: "80142328119754",
+      recommendedBalanceWei: "280142328119754",
+      recommendedFundingWei: "280142328119754"
+    };
+    const defaultRegistration: HypecastTestFarcasterRegistration = {
+      fid: 888,
+      transactionHash: `0x${"a".repeat(64)}` as `0x${string}`
+    };
+    const localSignerSentinel = "playwright-local-signer";
+    const defaultLocalSession: HypecastTestLocalFarcasterSession = {
+      fid: defaultProfile.fid,
+      custodyAddress: defaultWallet.address,
+      signerKeyId: localSignerSentinel,
+      signerPublicKey: `0x${"b".repeat(64)}` as `0x${string}`,
+      apiKey: "playwright-local-api-key"
+    };
+    const localProfile = {
+      ...defaultProfile,
+      ...input.localWrite?.profile
+    };
+    const localSession = {
+      ...defaultLocalSession,
+      ...input.localWrite?.session,
+      fid: input.localWrite?.session?.fid ?? input.localWrite?.profile?.fid ?? defaultLocalSession.fid,
+      custodyAddress:
+        input.localWrite?.session?.custodyAddress ??
+        input.localWrite?.profile?.custody ??
+        defaultLocalSession.custodyAddress,
+      apiKey: input.localWrite?.apiKey ?? input.localWrite?.session?.apiKey ?? defaultLocalSession.apiKey
+    };
     let feedLoadCount = 0;
+    let accountInspectionCount = 0;
     let castPublishCount = 0;
+    let signedCastPublishCount = 0;
+    let registeredFid = input.account?.quote?.fid ?? input.account?.quotes?.[0]?.fid;
+    let lastRegistrationTransactionHash: `0x${string}` | undefined;
+    const localWriteCalls = {
+      casts: [] as unknown[],
+      reactions: [] as unknown[]
+    };
+
+    (
+      window as Window & {
+        __hypecastLocalWriteCalls?: typeof localWriteCalls;
+      }
+    ).__hypecastLocalWriteCalls = localWriteCalls;
 
     if (input.write?.clientId) {
       window.localStorage.setItem("hypecast:neynar-client-id", input.write.clientId);
@@ -202,6 +288,21 @@ export async function mountApp(
           bio: input.write.session?.bio ?? defaultProfile.bio,
           pfpUrl: input.write.session?.pfpUrl ?? defaultProfile.pfpUrl
         })
+      );
+    }
+
+    if (input.localWrite?.preconnected) {
+      window.localStorage.setItem(
+        "hypecast:farcaster-profile",
+        JSON.stringify({
+          ...localProfile,
+          fid: localSession.fid,
+          custody: localSession.custodyAddress
+        })
+      );
+      window.localStorage.setItem(
+        "hypecast:farcaster-local-session",
+        JSON.stringify(localSession)
       );
     }
 
@@ -276,10 +377,112 @@ export async function mountApp(
           throw new Error(input.farcaster.profileError);
         }
 
+        if (input.farcaster?.exactProfile) {
+          return input.farcaster.exactProfile;
+        }
+
         return {
           ...defaultProfile,
           ...input.farcaster?.profile
         };
+      },
+      inspectFarcasterAccount: async ({ address, recoveryAddress }) => {
+        const inspectionIndex = accountInspectionCount;
+        accountInspectionCount += 1;
+        const quoteSequence = input.account?.quotes;
+        const quote =
+          quoteSequence && quoteSequence.length > 0
+            ? quoteSequence[Math.min(inspectionIndex, quoteSequence.length - 1)]
+            : input.account?.quote;
+        const delayMs = input.account?.inspectDelaysMs?.[inspectionIndex] ?? 0;
+
+        if (delayMs > 0) {
+          await sleep(delayMs);
+        }
+
+        if (input.account?.inspectError) {
+          throw new Error(input.account.inspectError);
+        }
+
+        return {
+          ...defaultAccountQuote,
+          address,
+          recoveryAddress,
+          ...quote,
+          ...(registeredFid ? { fid: registeredFid } : {})
+        };
+      },
+      registerFarcasterAccount: async () => {
+        if (input.account?.registerError) {
+          throw new Error(input.account.registerError);
+        }
+
+        const registration = {
+          ...defaultRegistration,
+          ...input.account?.registration
+        };
+
+        registeredFid = registration.fid;
+        lastRegistrationTransactionHash = registration.transactionHash;
+        return registration;
+      },
+      connectLocalFarcasterAccount: async ({
+        fid,
+        custodyAddress,
+        registrationTransactionHash
+      }) => {
+        if (input.localWrite?.connectError) {
+          throw new Error(input.localWrite.connectError);
+        }
+
+        if (
+          lastRegistrationTransactionHash &&
+          registrationTransactionHash !== lastRegistrationTransactionHash
+        ) {
+          throw new Error("The registration transaction hash was not forwarded to signer authorization.");
+        }
+
+        const connectedFid = registeredFid ?? fid ?? localSession.fid;
+
+        return {
+          ...localSession,
+          fid: connectedFid,
+          custodyAddress: (custodyAddress ?? localSession.custodyAddress) as Address
+        };
+      },
+      publishSignedCast: async (options) => {
+        if (input.localWrite?.castError) {
+          throw new Error(input.localWrite.castError);
+        }
+
+        localWriteCalls.casts.push(options);
+        signedCastPublishCount += 1;
+
+        return {
+          hash: `0x${String(signedCastPublishCount).padStart(40, "2")}`
+        };
+      },
+      publishSignedReaction: async (options) => {
+        if (input.localWrite?.reactionError) {
+          throw new Error(input.localWrite.reactionError);
+        }
+
+        localWriteCalls.reactions.push(options);
+      },
+      removeSignedCast: async () => {
+        if (input.localWrite?.removeCastError) {
+          throw new Error(input.localWrite.removeCastError);
+        }
+      },
+      publishSignedLink: async () => {
+        if (input.localWrite?.linkError) {
+          throw new Error(input.localWrite.linkError);
+        }
+      },
+      publishSignedProfile: async () => {
+        if (input.localWrite?.profileError) {
+          throw new Error(input.localWrite.profileError);
+        }
       },
       connectFarcasterWriteAccess: async ({ clientId, apiKey }) => {
         if (input.write?.connectError) {

@@ -30,9 +30,9 @@
   - Feed video cards can start playback inline without sending the user out to the linked source page
   - Plain image/video attachments can render without redundant title/source captions
   - Pulling down from the top of the feed triggers a fresh snapshot request without moving the pinned bottom rail
-  - Reply, recast, and like controls now wait for a real Farcaster write and then patch the local shell state without rerendering the full feed
-  - If a user tries to post, like, or recast without a signer, the shell opens an in-app write-access sheet and resumes the original action after Neynar auth succeeds
-  - Cast overflow menus expose local delete, copy-link, mute, and block actions inside an in-app context sheet
+  - Reply, recast, and like controls wait for a real Farcaster write and then patch the local shell state without rerendering the full feed
+  - If a user tries to post, like, or recast without a signer, the shell opens local account access first and can still hand off to the optional hosted Neynar signer flow
+  - Cast overflow menus expose network deletion for owned Farcaster casts plus local delete, copy-link, mute, and block actions inside an in-app context sheet
   - Shared cast routes with `cast` and optional `fid` query params can reopen a targeted cast inside the feed shell, and route parsing also understands wrapped Farcaster/Warpcast URLs
 - **Test Criteria**:
   - [x] Logged-in and signed-out states both render inside the same mobile shell
@@ -45,8 +45,8 @@
   - [x] Link previews are actionable and image/video cards expose media downloads
   - [x] Video cards expose an inline play control inside the feed
   - [x] Pulling down at scroll-top refreshes the feed snapshot
-  - [x] Reply, recast, and like buttons complete through the write-access flow and then update shell state and counts
-  - [x] Cast overflow actions can delete, copy, mute, and block locally inside Hypecast
+  - [x] Reply, recast, and like buttons complete through local or hosted write access and then update shell state and counts
+  - [x] Cast overflow actions can delete owned network casts, dismiss other casts locally, copy links, mute, and block inside Hypecast
   - [x] Shared cast routes reopen the requested cast in the shell on mobile and desktop
 
 ### Client Security Model
@@ -56,10 +56,13 @@
   - `SECURITY.md` defines supported versions, reporting expectations, and the browser-centric trust model
   - Shared security helpers escape untrusted text and allowlist remote `href` and `src` protocols before render
   - The app ships a restrictive meta CSP plus `Referrer-Policy` from `index.html`
+  - Custody imports are cleared from the form after parsing and never written to browser storage
+  - Ed25519 app signer seeds are stored only in an HKDF/AES-GCM encrypted vault and require the custody secret to unlock after reload
   - Vitest covers the protocol allowlist and feed preview normalization logic
 - **Test Criteria**:
   - [x] Unsafe `javascript:`, `data:text/html`, and `file:` links are rejected by the shared sanitizers
   - [x] Remote image URLs are normalized and filtered before entering renderable feed state
+  - [x] Unit coverage exercises custody parsing and encrypted signer-vault round trips without persisting raw custody material
   - [x] `npm run test:unit` passes for the security helper and feed normalization suite
 
 ### Farcaster Sign-In And Profile Binding
@@ -75,6 +78,26 @@
   - [x] QR code and deep link are rendered while the session is pending
   - [x] Session state persists across reloads
   - [x] Saved profile state can drive a personalized following feed request on reload
+
+### Local Farcaster Custody And Account Creation
+- **Stability**: in-progress
+- **Description**: Users can unlock an existing Farcaster account from its custody secret or create and register a new FID directly from the static browser client.
+- **Properties**:
+  - Imports accept 12- or 24-word BIP-39 phrases, 32-byte secp256k1 custody keys, and Hypecast/Maelstrom JSON backup fields
+  - Raw custody material remains in memory only for the active flow; the import field is cleared after parsing and no raw phrase or private key enters `localStorage`
+  - The custody key decrypts an existing Ed25519 app signer vault or authorizes a new scoped signer; the encrypted AES-GCM vault key is derived with HKDF-SHA-256
+  - Reloading or locking removes the decrypted signer and requires custody reimport, while forgetting the vault does not revoke its network authorization
+  - New-account setup generates a plaintext custody backup, fetches a live Optimism IdGateway quote and balance, shows a funding QR, and requires explicit backup confirmation before registration
+  - Registration signs `IdGateway.register` locally, waits for a successful Optimism receipt, reads the new FID back from the registry, and forwards the receipt hash into immediate app-signer authorization
+  - Signed messages prefer the configured Neynar Snapchain endpoint and fall back to the public Haatz gateway; post-submit readback is best-effort
+  - A new FID has no username until one is claimed through a separate Farcaster username flow
+- **Test Criteria**:
+  - [x] Valid supported imports derive the expected custody address and invalid phrases, keys, or conflicting JSON fields fail closed
+  - [x] Raw custody input is cleared and absent from `localStorage` after import
+  - [x] Registration is gated on live funding and explicit plaintext-backup confirmation, then verifies both the receipt and FID
+  - [x] Immediate post-registration signer authorization carries the IdGateway transaction hash and pending retries preserve it
+  - [x] The encrypted signer vault can only be reopened with the matching FID, custody address, and custody key
+  - [x] Direct casts, replies, reactions, profile fields, and owned-cast deletion use signed Farcaster messages
 
 ### Injected Wallet Connection
 - **Stability**: in-progress
@@ -114,12 +137,12 @@
 
 ### Cast Composer And Publishing
 - **Stability**: in-progress
-- **Description**: The floating compose action now preserves local drafts while publishing real casts and replies to Farcaster through a signer-backed Neynar flow.
+- **Description**: The floating compose action preserves local drafts while publishing real casts and replies through Hypecast's locally authorized signer or the optional hosted Neynar signer.
 - **Properties**:
   - Composer opens as an in-app sheet from the floating action button
   - Draft state survives accidental sheet closes and page reloads on the same device
-  - The first post or reply can collect a Neynar client ID plus matching API key and authorize write access without leaving the shell
-  - Successful publishing adds the new Farcaster cast into the shell immediately using the approved signer session
+  - The first post or reply opens local custody import/account creation, with a hosted Neynar client ID and API-key flow still available as a fallback
+  - Successful publishing adds the new Farcaster cast into the shell immediately using the active signer session
   - Reply actions route into the composer and publish Farcaster replies that increment the parent cast's reply count in the shell
 - **Test Criteria**:
   - [x] Compose button placement is present in the shell

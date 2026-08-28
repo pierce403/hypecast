@@ -25,7 +25,22 @@ const buildTime = new Date().toISOString();
 
 export default defineConfig({
   build: {
-    target: "esnext"
+    target: "esnext",
+    rollupOptions: {
+      output: {
+        chunkFileNames(chunkInfo) {
+          if (
+            chunkInfo.moduleIds.some((id) =>
+              id.includes("/node_modules/@farcaster/core/")
+            )
+          ) {
+            return "assets/farcaster-core-[hash].js";
+          }
+
+          return "assets/[name]-[hash].js";
+        }
+      }
+    }
   },
   define: {
     __HYPECAST_BUILD_ID__: JSON.stringify(buildId),
@@ -60,8 +75,21 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globIgnores: ["**/*.wasm"],
+        globIgnores: ["**/*.wasm", "**/farcaster-core-*.js"],
         runtimeCaching: [
+          {
+            urlPattern: ({ url }) =>
+              url.origin === self.location.origin &&
+              /\/assets\/farcaster-core-[^/]+\.js$/.test(url.pathname),
+            handler: "CacheFirst",
+            options: {
+              cacheName: "farcaster-core",
+              expiration: {
+                maxEntries: 2,
+                maxAgeSeconds: 60 * 60 * 24 * 30
+              }
+            }
+          },
           {
             urlPattern: ({ url }) => url.pathname.endsWith(".wasm"),
             handler: "CacheFirst",
