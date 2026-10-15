@@ -59,3 +59,10 @@ Copy `.env.example` to `.env` if you need custom settings.
 - Production deploys from `main` through `.github/workflows/deploy-pages.yml`.
 - GitHub Pages should stay on the `workflow` build type with the custom domain set to `hypecast.net`.
 - The workflow uploads the Vite `dist/` output as the Pages artifact and deploys it to the `github-pages` environment.
+
+## Cloudflare production hosting
+
+Native Git publishes main with npm ci, npm run build:cloudflare and npm run deploy.
+Original build/Pages recovery, public URLs, local save formats and PWA paths remain.
+Credentials stay in Cloudflare; previews are off. Native artifact hashes and
+revision markers provide exact live evidence. Zone request metrics are used without injecting browser analytics or loosening the CSP.

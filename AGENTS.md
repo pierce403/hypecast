@@ -193,3 +193,10 @@ Notes:
 - Product direction so far: PWA first, mobile-friendly, accessible on web, wallet-native, Farcaster-integrated, XMTP-capable.
 - Keep responses concise and execution-oriented.
 - Update this file when collaborator preferences or product direction become clearer.
+
+## Cloudflare static hosting
+
+Native main builds use the original generator plus build:cloudflare postprocessing.
+Run the existing meaningful tests/typecheck and npm run check:deploy. Pages/source
+recovery remains; credentials stay in Cloudflare and previews stay off. Local saves,
+service-worker paths and integration behavior are not changed by hosting.
