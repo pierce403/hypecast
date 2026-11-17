@@ -66,3 +66,7 @@ Native Git publishes main with npm ci, npm run build:cloudflare and npm run depl
 Original build/Pages recovery, public URLs, local save formats and PWA paths remain.
 Credentials stay in Cloudflare; previews are off. Native artifact hashes and
 revision markers provide exact live evidence. Zone request metrics are used without injecting browser analytics or loosening the CSP.
+
+## Licensing scope
+
+Original project code and documentation are licensed under the [Apache License, Version 2.0](LICENSE). Third-party dependencies, vendored code, quoted material, data, fonts, media, and other third-party assets retain their respective licenses and rights; this grant does not relicense them. Existing license notices and attribution must be preserved.
